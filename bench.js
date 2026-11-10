@@ -12,6 +12,7 @@ const wirePreview = byId("wire-preview");
 const draftPoints = byId("draft-points");
 const editor = byId("part-editor");
 const editorInput = byId("part-value");
+const readingTip = byId("board-reading");
 const frequencyInput = byId("part-frequency");
 const boardScroll = board.parentElement;
 const inspector = byId("inspector");
@@ -45,6 +46,9 @@ let selection = null;
 let pending = null;
 let bends = [];
 let editing = null;
+let editorAnchor = null;
+let hovered = null;
+const clipboardPrefix = "circuit-lab:part:v1:";
 let drag = null;
 let live = false;
 let result = null;
@@ -55,6 +59,7 @@ let transientReading = null;
 const scope = createScope();
 const simulation = createSimulation(scope.sample, (reading) => {
   transientReading = reading;
+  refreshReadingTip();
   if (flowMode) refreshFlow();
   for (const part of parts) {
     if (!components[part.type].light) continue;
@@ -66,6 +71,7 @@ const simulation = createSimulation(scope.sample, (reading) => {
   simulationError.textContent = error.message;
   simulationError.hidden = false;
   draw();
+  refreshReadingTip();
 });
 
 paletteGroups.innerHTML = groups.map((group, index) =>
@@ -129,6 +135,94 @@ function number(value, unit) {
   return Number(value.toPrecision(4)) + " " + unit;
 }
 
+function readDC() {
+  if (!dcReading && !dcError) {
+    try {
+      dcReading = measure(parts, wires);
+    } catch (error) {
+      dcError = error.message;
+    }
+  }
+  return dcReading;
+}
+
+function hideReadingTip() {
+  hovered = null;
+  readingTip.hidden = true;
+}
+
+function terminalLabel(part, pin) {
+  return components[part.type].labels?.[pin] ?? (pin ? "오른쪽" : "왼쪽");
+}
+
+function refreshReadingTip() {
+  if (!hovered) return;
+  const running = simulation.isRunning();
+  const reading = running ? transientReading : simulationError.hidden ? readDC() : null;
+  const volts = (end) => reading?.volts.get(keyOf(end));
+  const { part, wire, pin, clientX, clientY } = hovered;
+  let label, voltage, amps, direction;
+  if (wire) {
+    label = `배선 ${wire.id}`;
+    voltage = "접지 기준 전압 " + number(volts(wire.a), "V");
+    amps = reading?.wireCurrents.get(wire.id);
+    if (amps) {
+      const [from, to] = amps > 0 ? [wire.a, wire.b] : [wire.b, wire.a];
+      const terminalName = ([id, index]) => {
+        const device = parts.find((item) => item.id === id);
+        return components[device.type].name + " " + id + " · " + terminalLabel(device, index);
+      };
+      direction = terminalName(from) + " → " + terminalName(to);
+      amps = Math.abs(amps);
+    }
+  } else {
+    const spec = components[part.type];
+    const terminalName = (index) => terminalLabel(part, index);
+    label = `${spec.name} ${part.id}`;
+    amps = reading?.currents.get(part.id);
+    if (pin !== null || pinCount(part) === 1) {
+      voltage = `${terminalName(pin ?? 0)} 전압 ${number(volts([part.id, pin ?? 0]), "V")}`;
+    } else if (pinCount(part) === 2) {
+      const a = volts([part.id, 0]);
+      const b = volts([part.id, 1]);
+      voltage = "양단 전압 " + number(a === undefined || b === undefined ? undefined : a - b, "V");
+    } else {
+      voltage = pinsFor(part).map((_, index) =>
+        `${terminalName(index)} ${number(volts([part.id, index]), "V")}`).join("\n");
+    }
+    if (amps) direction = terminalName(0) + " → " + terminalName(1) + " 기준";
+  }
+  const mode = running ? "실시간" : "DC";
+  const current = number(amps === undefined ? undefined : amps * 1000, "mA");
+  const detail = [label + " · " + mode, voltage, "전류 " + current, direction].filter(Boolean).join("\n");
+  if (readingTip.textContent !== detail) readingTip.textContent = detail;
+  readingTip.hidden = false;
+  const bounds = boardScroll.getBoundingClientRect();
+  const x = clientX - bounds.left;
+  const y = clientY - bounds.top;
+  const left = Math.min(x + 14, boardScroll.clientWidth - readingTip.offsetWidth - 8);
+  const top = y + 16 + readingTip.offsetHeight <= boardScroll.clientHeight ? y + 16 : y - readingTip.offsetHeight - 12;
+  readingTip.style.left = boardScroll.scrollLeft + Math.max(8, left) + "px";
+  readingTip.style.top = boardScroll.scrollTop + Math.max(8, top) + "px";
+}
+
+board.addEventListener("pointermove", (event) => {
+  if (event.pointerType === "touch" || drag || pending || placing || paletteDrag) return hideReadingTip();
+  const wire = event.target.closest("[data-wire]");
+  const part = event.target.closest(".part");
+  if (!wire && !part) return hideReadingTip();
+  hovered = {
+    wire: wire && wires.find(({ id }) => id === Number(wire.dataset.wire)),
+    part: part && parts.find(({ id }) => id === Number(part.dataset.part)),
+    pin: event.target.hasAttribute("data-terminal") ? Number(event.target.dataset.terminal) : null,
+    clientX: event.clientX, clientY: event.clientY,
+  };
+  refreshReadingTip();
+});
+board.addEventListener("pointerleave", hideReadingTip);
+board.addEventListener("pointerdown", hideReadingTip);
+boardScroll.addEventListener("scroll", hideReadingTip);
+
 function lightOn(part, reading) {
   if (!components[part.type].light) return false;
   const current = reading?.currents.get(part.id) ?? 0;
@@ -155,7 +249,7 @@ function partMarkup(part) {
     const [x, y] = pinPosition([part.id, pin]);
     const key = keyOf([part.id, pin]);
     const active = pending && keyOf(pending) === key;
-    const label = spec.labels?.[pin] ?? (pin ? "오른쪽" : "왼쪽");
+    const label = terminalLabel(part, pin);
     const value = result?.volts.get(key);
     return `<circle class="terminal${active ? " pending" : ""}" data-terminal="${pin}" data-part="${part.id}" cx="${x - part.x}" cy="${y - part.y}" r="7" role="button" tabindex="0" aria-label="${spec.name} ${part.id} ${label} 단자"><title>클릭해 배선 연결 · 끌어서 회전</title></circle>
       ${result ? `<text class="voltage-label" x="${x - part.x}" y="${y - part.y - 12}">${value === undefined ? "—" : number(value, "V")}</text>` : ""}`;
@@ -265,9 +359,11 @@ function drawInspector() {
 }
 
 function positionEditor() {
+  if (editor.hidden) return;
   const matrix = board.getScreenCTM();
-  if (editor.hidden || !editing || !matrix) return;
-  const anchor = new DOMPoint(editing.x, editing.y).matrixTransform(matrix);
+  if (!matrix) return;
+  const { x: anchorX, y: anchorY } = editing ?? editorAnchor;
+  const anchor = new DOMPoint(anchorX, anchorY).matrixTransform(matrix);
   const bounds = boardScroll.getBoundingClientRect();
   const x = anchor.x - bounds.left;
   const y = anchor.y - bounds.top;
@@ -298,15 +394,33 @@ function openEditor(part) {
     frequencyInput.value = part.frequency;
   }
   byId("scope-jump").hidden = part.type !== "scope";
+  byId("rotate-part").hidden = false;
+  byId("editor-delete").textContent = "부품 삭제";
+  editor.hidden = false;
+  positionEditor();
+}
+
+function openWireEditor(wire, anchor) {
+  if (!anchor) {
+    const path = wireLayer.querySelector(`[data-wire="${wire.id}"] .wire-line`);
+    anchor = path.getPointAtLength(path.getTotalLength() / 2);
+  }
+  editorAnchor = anchor;
+  byId("editor-title").textContent = `배선 ${wire.id}`;
+  byId("editor-value").hidden = byId("editor-frequency").hidden = true;
+  editorInput.disabled = frequencyInput.disabled = true;
+  byId("scope-jump").hidden = byId("rotate-part").hidden = true;
+  byId("editor-delete").textContent = "배선 삭제";
   editor.hidden = false;
   positionEditor();
 }
 
 function closeEditor(restoreFocus = false) {
-  const part = editing;
-  editing = null;
+  const selector = editing ? `[data-body="${editing.id}"]` :
+    editorAnchor && `[data-wire="${selection?.id}"]`;
+  editing = editorAnchor = null;
   editor.hidden = true;
-  if (restoreFocus && part) board.querySelector(`[data-body="${part.id}"]`)?.focus({ preventScroll: true });
+  if (restoreFocus && selector) board.querySelector(selector)?.focus({ preventScroll: true });
 }
 
 editor.addEventListener("submit", (event) => {
@@ -372,7 +486,6 @@ function draw() {
   }
   byId("bench-count").textContent = `부품 ${parts.length}개 · 배선 ${wires.length}개`;
   byId("empty-board").hidden = parts.length > 0 || Boolean(placing) || Boolean(paletteDrag?.moved);
-  byId("delete").disabled = !selection;
   byId("clear-board").disabled = !parts.length;
   byId("example").disabled = parts.length > 0;
   drawInspector();
@@ -391,13 +504,8 @@ function update() {
   dcReading = null;
   dcError = "";
   transientReading = null;
-  if (live || flowMode || parts.some(({ type }) => components[type].light)) {
-    try {
-      dcReading = measure(parts, wires);
-    } catch (error) {
-      dcError = error.message;
-    }
-  }
+  hideReadingTip();
+  if (live || flowMode || parts.some(({ type }) => components[type].light)) readDC();
   result = live ? dcReading : null;
   byId("simulate").setAttribute("aria-pressed", String(live));
   solveStatus.hidden = !live;
@@ -421,7 +529,8 @@ function setCamera(zoom, x, y) {
   camera = { zoom, x: clamp(x, width - viewWidth), y: clamp(y, height - viewHeight) };
   board.setAttribute("viewBox", `${camera.x} ${camera.y} ${viewWidth} ${viewHeight}`);
   board.classList.toggle("is-zoomed", zoom > 1);
-  byId("zoom-reset").textContent = Math.round(zoom * 100) + "%";
+  byId("zoom-reset").textContent = "초기화 · " + Math.round(zoom * 100) + "%";
+  hideReadingTip();
   byId("zoom-out").disabled = zoom <= minZoom;
   byId("zoom-in").disabled = zoom >= maxZoom;
   positionEditor();
@@ -445,7 +554,11 @@ board.addEventListener("wheel", (event) => {
 }, { passive: false });
 byId("zoom-out").addEventListener("click", () => zoomBy(1 / 1.25));
 byId("zoom-in").addEventListener("click", () => zoomBy(1.25));
-byId("zoom-reset").addEventListener("click", () => setCamera(1, 0, 0));
+byId("zoom-reset").addEventListener("click", () => {
+  setCamera(1, 0, 0);
+  boardScroll.scrollTo(0, 0);
+  positionEditor();
+});
 byId("simulation-speed").addEventListener("change", (event) => {
   const speed = Number(event.target.value);
   simulation.setSpeed(speed);
@@ -465,15 +578,20 @@ function addPart(type, x, y) {
   return part;
 }
 
-function place(x, y) {
+function canPlace(type) {
   if (parts.length >= maxParts) {
     status.textContent = `부품은 최대 ${maxParts}개까지 배치할 수 있습니다.`;
     return;
   }
-  if (placing === "scope" && parts.filter(({ type }) => type === "scope").length >= 4) {
+  if (type === "scope" && parts.filter(({ type }) => type === "scope").length >= 4) {
     status.textContent = "오실로스코프는 최대 4개까지 연결할 수 있습니다.";
     return;
   }
+  return true;
+}
+
+function place(x, y) {
+  if (!canPlace(placing)) return;
   const part = addPart(placing, x, y);
   selection = { kind: "part", id: part.id };
   placing = null;
@@ -522,7 +640,7 @@ function connect(id, pin) {
   update();
 }
 
-function activate(target) {
+function activate(target, anchor) {
   const terminal = target.closest("[data-terminal]");
   const body = target.closest("[data-body]");
   const wire = target.closest("[data-wire]");
@@ -542,6 +660,7 @@ function activate(target) {
   status.textContent = defaultStatus;
   draw();
   if (body) openEditor(parts.find((part) => part.id === selection.id));
+  else if (wire) openWireEditor(wires.find(({ id }) => id === selection.id), anchor);
 }
 
 function dropPoint(event) {
@@ -759,7 +878,7 @@ board.addEventListener("click", (event) => {
     drawDraft();
     status.textContent = `경유점 ${bends.length}개 · 두 번째 단자를 눌러 연결하세요. Backspace로 마지막 점을 지울 수 있습니다.`;
   } else if (event.target !== board) {
-    activate(event.target);
+    activate(event.target, point(event));
   }
 });
 document.addEventListener("keydown", (event) => {
@@ -773,7 +892,7 @@ document.addEventListener("keydown", (event) => {
     closeEditor(true);
     return;
   }
-  if (event.target.matches("input, textarea")) return;
+  if (isTextEditing(event.target) || event.ctrlKey || event.metaKey || event.altKey) return;
   if (event.key === "Backspace" && pending && bends.length) {
     event.preventDefault();
     bends.pop();
@@ -792,7 +911,8 @@ document.addEventListener("keydown", (event) => {
     status.textContent = defaultStatus;
     draw();
   } else if (event.key === "Delete" && selection) {
-    byId("delete").click();
+    event.preventDefault();
+    deleteSelection();
   } else if (event.key === "Enter" && placing && event.target.closest("#palette")) {
     event.preventDefault();
     place(120 + (parts.length % 7) * 115, 100 + Math.floor(parts.length / 7) * 85);
@@ -805,12 +925,69 @@ document.addEventListener("keydown", (event) => {
       target.hasAttribute("data-body") ? `[data-body="${target.dataset.body}"]` :
       `[data-wire="${target.dataset.wire}"]`;
     activate(target);
-    if (!editor.hidden && !editorInput.disabled) editorInput.focus({ preventScroll: true });
-    else board.querySelector(selector)?.focus();
+    if (!editor.hidden) {
+      (editorInput.disabled ? byId("editor-delete") : editorInput).focus({ preventScroll: true });
+    } else board.querySelector(selector)?.focus();
   }
 });
-byId("delete").addEventListener("click", () => {
-  if (!selection) return;
+function isTextEditing(target) {
+  return target.closest?.("input, textarea, select") || target.isContentEditable;
+}
+
+function canUseClipboard(event) {
+  return !byId("bench").hidden && !isTextEditing(event.target) && !drag && !paletteDrag && event.clipboardData;
+}
+
+for (const action of ["copy", "cut"]) {
+  document.addEventListener(action, (event) => {
+    if (!canUseClipboard(event) || selection?.kind !== "part" || !getSelection().isCollapsed) return;
+    const part = parts.find(({ id }) => id === selection.id);
+    event.clipboardData.setData("text/plain", clipboardPrefix + JSON.stringify(part));
+    event.preventDefault();
+    if (action === "cut") deleteSelection();
+    status.textContent = `${components[part.type].name} ${action === "cut" ? "잘라내기" : "복사"} 완료.`;
+  });
+}
+
+document.addEventListener("paste", (event) => {
+  if (!canUseClipboard(event)) return;
+  const text = event.clipboardData.getData("text/plain");
+  if (!text.startsWith(clipboardPrefix) || text.length > 500) return;
+  let saved;
+  try {
+    saved = JSON.parse(text.slice(clipboardPrefix.length));
+  } catch {
+    return;
+  }
+  if (!saved || !Object.hasOwn(components, saved.type)) return;
+  const { type, value, frequency, angle, x, y } = saved;
+  const spec = components[type];
+  if (![x, y, value].every(Number.isFinite) || !Number.isInteger(angle) || angle < 0 || angle >= 360 ||
+      value < (spec.min ?? 0) || value > (spec.max ?? (spec.toggle ? 1 : 0)) ||
+      (spec.toggle && ![0, 1].includes(value)) ||
+      (spec.shape && (!Number.isFinite(frequency) || frequency < frequencyRange.min || frequency > frequencyRange.max))) return;
+  event.preventDefault();
+  if (!canPlace(type)) return;
+  const right = camera.x + width / camera.zoom;
+  const bottom = camera.y + height / camera.zoom;
+  const candidates = [[x + 100, y], [x - 100, y], [x, y + 90], [x, y - 90]];
+  const [left, top] = candidates.find(([a, b]) => a > camera.x + 40 && a < right - 40 &&
+    b > camera.y + 30 && b < bottom - 30 && a >= 60 && a <= width - 60 && b >= 60 && b <= height - 80 &&
+    !parts.some((part) => Math.abs(part.x - a) < 85 && Math.abs(part.y - b) < 65)) ?? [(camera.x + right) / 2, (camera.y + bottom) / 2];
+  const part = addPart(type, left, top);
+  Object.assign(part, { value, angle, ...(spec.shape ? { frequency } : {}) });
+  closeEditor();
+  selection = { kind: "part", id: part.id };
+  placing = pending = null;
+  bends = [];
+  update();
+  openEditor(part);
+  board.querySelector(`[data-body="${part.id}"]`)?.focus({ preventScroll: true });
+  status.textContent = `${spec.name} 붙여넣기 완료.`;
+});
+
+function deleteSelection() {
+  if (!selection || drag || paletteDrag) return;
   closeEditor();
   const { kind, id } = selection;
   if (kind === "part") {
@@ -820,9 +997,12 @@ byId("delete").addEventListener("click", () => {
     wires = wires.filter((wire) => wire.id !== id);
   }
   selection = pending = null;
+  bends = [];
   update();
+  board.focus({ preventScroll: true });
   status.textContent = kind === "part" ? "부품과 연결된 배선을 지웠습니다." : "배선을 지웠습니다.";
-});
+}
+byId("editor-delete").addEventListener("click", deleteSelection);
 byId("clear-board").addEventListener("click", () => {
   closeEditor();
   parts = [];
@@ -940,15 +1120,16 @@ let loadedHash;
 function route() {
   const hash = location.hash;
   const rc = hash === "#rc" || hash.startsWith("#lab=");
-  if (rc) {
+  const logic = hash === "#logic" || hash.startsWith("#logic=");
+  if (rc || logic) {
     closeEditor();
+    hideReadingTip();
     if (fallbackFullscreen) {
       fallbackFullscreen = false;
       syncFullscreen();
     }
     if (document.fullscreenElement === workbench) document.exitFullscreen().catch(syncFullscreen);
   }
-  const logic = hash === "#logic" || hash.startsWith("#logic=");
   byId("logic-workbench").hidden = !logic;
   byId("open-logic").setAttribute("aria-current", logic ? "page" : "false");
   byId("bench").hidden = rc || logic;

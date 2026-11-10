@@ -56,17 +56,16 @@
       <button type="button" data-flow="current" aria-pressed="false">전류 방향</button>
       <button type="button" data-flow="electrons" aria-pressed="false">전자 이동</button>
     </div>
-    <button id="delete" type="button" disabled>선택 삭제</button>
     <button id="clear-board" type="button" disabled>모두 지우기</button>
     <div class="board-zoom" role="group" aria-label="회로도 확대 및 축소">
       <button id="zoom-out" type="button" aria-label="축소">−</button>
-      <button id="zoom-reset" type="button" aria-label="배율 100%로 초기화" title="배율 초기화">100%</button>
+      <button id="zoom-reset" type="button" aria-label="화면 초기화 (100%, 기본 위치)" title="배율과 위치 초기화">초기화 · 100%</button>
       <button id="zoom-in" type="button" aria-label="확대">+</button>
     </div>
     <button id="fullscreen" type="button" aria-pressed="false"><span aria-hidden="true">⛶</span> <span id="fullscreen-label">전체화면</span></button>
   </div></header>
   <div class="board-scroll">
-    <svg id="board" viewBox="0 0 960 520" aria-label="회로 조립 영역">
+    <svg id="board" tabindex="-1" viewBox="0 0 960 520" aria-label="회로 조립 영역">
       <defs><pattern id="board-grid" width="20" height="20" patternUnits="userSpaceOnUse"><circle cx="0" cy="0" r="1.3" fill="#506681"/></pattern></defs>
       <rect id="board-surface" width="960" height="520" fill="url(#board-grid)"/>
       <g id="wire-layer"></g><path id="wire-preview" hidden/><g id="draft-points"></g><g id="part-layer"></g><g id="placement-preview" aria-hidden="true" hidden></g>
@@ -81,12 +80,14 @@
       </div>
       <button id="scope-jump" type="button" hidden>오실로스코프 열기</button>
       <button id="rotate-part" type="button">↻ 90° 회전</button>
+      <button id="editor-delete" type="button">부품 삭제</button>
     </form>
+    <div id="board-reading" class="board-reading" role="tooltip" hidden></div>
     <div id="empty-board"><span aria-hidden="true">⊕</span><strong>빈 작업대</strong><p>위에서 부품을 끌어 놓으세요.</p></div>
   </div>
   <div class="board-feedback">
     <p id="bench-status" class="board-status" role="status">단자에서 시작해 빈 곳을 클릭하면 배선 경유점을 추가할 수 있습니다.</p>
-    <p class="board-view-hint">마우스 휠로 확대·축소 · 확대 후 빈 곳을 끌어 화면 이동</p>
+    <p class="board-view-hint">휠로 확대·축소 · 확대 후 빈 곳을 끌어 화면 이동 · 부품 복사/잘라내기/붙여넣기 Ctrl(⌘)+C/X/V · 선택 삭제 Delete</p>
     <p id="simulation-error" class="board-measurement" role="status" hidden></p>
     <p id="flow-status" class="board-measurement" hidden></p>
     <p id="solve-status" class="board-measurement" role="status" hidden></p>
