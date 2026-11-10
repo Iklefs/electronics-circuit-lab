@@ -1,6 +1,7 @@
 :root{color-scheme:light;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Noto Sans KR",sans-serif;background:#f3f6fa;color:#162338;--blue:#2458df;--muted:#526278;--line:#dce4ef}
 *{box-sizing:border-box}
-body{margin:0}
+body{margin:0;-webkit-user-select:none;user-select:none}
+input,textarea,[contenteditable="true"]{-webkit-user-select:text;user-select:text}
 button,input,textarea{font:inherit}
 button{cursor:pointer;border:1px solid var(--line);border-radius:9px;background:white;color:#20395e;padding:.62rem .9rem;font-weight:650}
 button:hover{background:#eaf1ff}
@@ -146,6 +147,7 @@ button:disabled{cursor:default;opacity:.48}
 .editor-heading{justify-content:space-between}
 .part-editor button{padding:.28rem .45rem;white-space:nowrap;font-size:inherit}
 #editor-delete{background:#fff1f2;color:#9e2837;border-color:#ebbec6}
+#editor-reading{display:none;white-space:pre-line;margin:0}
 .board-reading{position:absolute;z-index:3;pointer-events:none;white-space:pre-line;max-width:calc(100% - 16px);padding:.45rem .65rem;border:1px solid #6f95bc;border-radius:8px;background:#14243b;color:#e1f0ff;box-shadow:0 4px 14px #0006;font-size:.76rem;font-variant-numeric:tabular-nums}
 .part-editor input{width:100%;min-width:0;border:1px solid var(--line);border-radius:6px;padding:.3rem}
 #editor-label{display:block;margin-bottom:.2rem}
@@ -239,3 +241,40 @@ body.workbench-expanded{overflow:hidden}
 .logic-signal,#logic-draft{fill:none;stroke:var(--signal,#c9e1ff);stroke-width:3;stroke-linecap:round;pointer-events:none}
 .logic-wire.selected .logic-signal,.logic-wire:focus-visible .logic-signal{stroke:#ffe298;stroke-width:4}
 .logic-signal[data-signal="-1"],#logic-draft{stroke-dasharray:5 4}
+
+#logic-board.is-zoomed:not(.placing) #logic-surface{cursor:grab}
+#logic-board.panning #logic-surface{cursor:grabbing}
+#board.is-zoomed,#logic-board.is-zoomed{touch-action:none}
+#board,#logic-board,.palette,#scope-plot{-webkit-touch-callout:none}
+#scope-plot{touch-action:pan-y}
+.touch-hint{display:none}
+
+@media(max-width:700px){
+  #bench,#logic-workbench{padding-inline:clamp(.5rem,3vw,1rem)}
+  .bench-heading{gap:.45rem}
+  .bench-heading h1{font-size:clamp(1.45rem,6vw,2rem)}
+  .board-bar,.board-feedback{padding:.55rem .65rem}
+  #board,#logic-board{min-width:0;min-height:0;height:auto}
+  .part-editor{position:static;width:auto;max-width:none;margin:.5rem}
+  .workbench:fullscreen #board,.workbench.is-expanded #board{height:max(220px,calc(100dvh - 260px))}
+  .scope-heading{flex-wrap:wrap}
+}
+
+@media(pointer:coarse){
+  #board,#logic-board{touch-action:none}
+  button,.lab-nav a{touch-action:manipulation}
+  #editor-reading{display:block}
+  .desktop-hint{display:none}
+  .touch-hint{display:block}
+  .lab-nav a,.board-actions button,.board-actions select,.palette button,.palette-groups button,
+  .ribbon-examples button,.ribbon-examples select,#logic-example,.scope-actions button,.scope-actions select{
+    min-height:44px;
+  }
+  .lab-nav a{display:flex;align-items:center}
+  .board-zoom button{min-width:44px}
+  .terminal,.logic-pin{r:12px}
+  .waypoint{r:11px}
+  .wire-hit{stroke-width:24}
+  .part-editor button,.part-editor input{min-height:40px}
+  .part-editor input,.link-row input{font-size:16px}
+}

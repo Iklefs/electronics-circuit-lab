@@ -1,4 +1,5 @@
 import { solveLogic } from "./wasm-engine.js";
+import { createBoardCamera } from "./board-camera.js";
 
 const types = {
   input: { name: "입력 스위치", icon: "▣", code: 0, inputs: 0, output: true },
@@ -17,6 +18,7 @@ const types = {
 const byId = (id) => document.getElementById(id);
 const workspace = byId("logic-workbench");
 const board = byId("logic-board");
+const surface = byId("logic-surface");
 const palette = byId("logic-palette");
 const partLayer = byId("logic-parts");
 const wireLayer = byId("logic-wires");
@@ -35,6 +37,9 @@ let placing = null;
 let selection = null;
 let gesture = null;
 let loadedHash;
+const { view: camera, set: setCamera, point } = createBoardCamera(board, {
+  width, height, controls: byId("logic-zoom"), busy: () => Boolean(gesture),
+});
 
 const textValue = (value) => value === 0 || value === 1 ? String(value) : "X";
 const signal = (value) => value === 0 || value === 1 ? value : -1;
@@ -102,6 +107,7 @@ function draw(values) {
   byId("logic-clear").disabled = parts.length === 0;
   byId("logic-example").disabled = parts.length > 0;
   byId("logic-delete").disabled = !selection;
+  byId("logic-cancel").hidden = !placing && !pending;
   board.classList.toggle("placing", Boolean(placing || gesture?.type));
   for (const button of palette.querySelectorAll("button")) {
     button.setAttribute("aria-pressed", String(placing === button.dataset.logicType));
@@ -117,10 +123,6 @@ function update(message = instructions, changed = true) {
     draw(null);
     status.textContent = error.message;
   }
-}
-
-function point(event) {
-  return new DOMPoint(event.clientX, event.clientY).matrixTransform(board.getScreenCTM().inverse());
 }
 
 function move(part, x, y) {
@@ -189,26 +191,41 @@ palette.addEventListener("click", (event) => {
   if (!type) return;
   placing = placing === type ? null : type;
   pending = null;
-  update(placing ? "작업대에서 놓을 곳을 클릭하세요. Enter로도 배치할 수 있습니다." : instructions, false);
+  update(placing ? "작업대에서 놓을 곳을 누르세요. Enter로도 배치할 수 있습니다." : instructions, false);
 });
 palette.addEventListener("pointerdown", (event) => {
   const button = event.target.closest("[data-logic-type]");
-  if (!button || event.button !== 0 || gesture) return;
+  if (!event.isPrimary || !button || event.button !== 0 || gesture) return;
   gesture = { type: button.dataset.logicType, pointer: event.pointerId, x: event.clientX, y: event.clientY };
   button.setPointerCapture(event.pointerId);
 });
 board.addEventListener("pointerdown", (event) => {
+  if (!event.isPrimary || placing || event.button !== 0 || gesture) return;
+  const start = { pointer: event.pointerId, x: event.clientX, y: event.clientY };
+  if (camera.zoom > 1 && event.target === surface) {
+    gesture = { ...start, camera: { ...camera }, scale: board.getScreenCTM().a };
+    board.setPointerCapture(event.pointerId);
+    return;
+  }
   const body = event.target.closest("[data-logic-body]");
-  if (!body || placing || event.button !== 0 || gesture) return;
+  if (!body) return;
   const part = parts.find(({ id }) => id === Number(body.dataset.logicBody));
-  gesture = { part, pointer: event.pointerId, x: event.clientX, y: event.clientY, anchor: point(event), original: [part.x, part.y] };
+  gesture = { ...start, part, anchor: point(event), original: [part.x, part.y] };
   board.setPointerCapture(event.pointerId);
 });
 
 function moveGesture(event) {
   if (gesture?.pointer !== event.pointerId) return;
-  if (!gesture.moved && Math.hypot(event.clientX - gesture.x, event.clientY - gesture.y) < 6) return;
+  const dx = event.clientX - gesture.x;
+  const dy = event.clientY - gesture.y;
+  if (!gesture.moved && Math.hypot(dx, dy) < 6) return;
   gesture.moved = true;
+  if (gesture.camera) {
+    const { camera: start, scale } = gesture;
+    board.classList.add("panning");
+    setCamera(start.zoom, start.x - dx / scale, start.y - dy / scale);
+    return;
+  }
   if (gesture.type) {
     status.textContent = "작업대 안에서 놓으면 부품이 추가됩니다.";
     board.classList.add("placing");
@@ -229,10 +246,16 @@ function moveGesture(event) {
 let suppressClick = false;
 function finish(event, cancelled = false) {
   if (gesture?.pointer !== event.pointerId) return;
-  const { part, type, moved, original } = gesture;
+  const { part, type, moved, original, camera: start } = gesture;
   gesture = null;
   if (type && !moved) return;
-  suppressClick = Boolean(moved);
+  suppressClick = !cancelled;
+  if (start) {
+    board.classList.remove("panning");
+    if (cancelled) setCamera(start.zoom, start.x, start.y);
+    else if (!moved) activate(surface);
+    return;
+  }
   if (cancelled) {
     if (part) [part.x, part.y] = original;
     update(instructions, false);
@@ -276,6 +299,11 @@ board.addEventListener("click", (event) => {
   } else if (event.target !== board) {
     activate(event.target);
   }
+});
+
+byId("logic-cancel").addEventListener("click", () => {
+  pending = placing = null;
+  update(instructions, false);
 });
 
 byId("logic-delete").addEventListener("click", () => {

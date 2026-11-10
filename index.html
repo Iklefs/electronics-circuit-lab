@@ -56,11 +56,12 @@
       <button type="button" data-flow="current" aria-pressed="false">전류 방향</button>
       <button type="button" data-flow="electrons" aria-pressed="false">전자 이동</button>
     </div>
+    <button id="bench-cancel" type="button" hidden>취소</button>
     <button id="clear-board" type="button" disabled>모두 지우기</button>
     <div class="board-zoom" role="group" aria-label="회로도 확대 및 축소">
-      <button id="zoom-out" type="button" aria-label="축소">−</button>
-      <button id="zoom-reset" type="button" aria-label="화면 초기화 (100%, 기본 위치)" title="배율과 위치 초기화">초기화 · 100%</button>
-      <button id="zoom-in" type="button" aria-label="확대">+</button>
+      <button id="zoom-out" data-zoom="out" type="button" aria-label="축소">−</button>
+      <button id="zoom-reset" data-zoom="reset" type="button" aria-label="화면 초기화 (100%, 기본 위치)" title="배율과 위치 초기화">초기화 · 100%</button>
+      <button id="zoom-in" data-zoom="in" type="button" aria-label="확대">+</button>
     </div>
     <button id="fullscreen" type="button" aria-pressed="false"><span aria-hidden="true">⛶</span> <span id="fullscreen-label">전체화면</span></button>
   </div></header>
@@ -72,6 +73,7 @@
     </svg>
     <form id="part-editor" class="part-editor" aria-labelledby="editor-title" hidden>
       <div class="editor-heading"><strong id="editor-title"></strong><button id="editor-close" type="button" aria-label="편집 닫기">×</button></div>
+      <p id="editor-reading"></p>
       <div id="editor-value"><label id="editor-label" for="part-value"></label>
         <div class="editor-row"><input id="part-value" type="number" step="any" required><button class="primary" type="submit">적용</button></div>
       </div>
@@ -87,7 +89,8 @@
   </div>
   <div class="board-feedback">
     <p id="bench-status" class="board-status" role="status">단자에서 시작해 빈 곳을 클릭하면 배선 경유점을 추가할 수 있습니다.</p>
-    <p class="board-view-hint">휠로 확대·축소 · 확대 후 빈 곳을 끌어 화면 이동 · 복사/잘라내기/붙여넣기 Ctrl(⌘)+C/X/V · 삭제 Delete · 되돌리기 Ctrl(⌘)+Z · 다시 실행 Ctrl(⌘)+Shift+Z</p>
+    <p class="board-view-hint desktop-hint">휠로 확대·축소 · 확대 후 빈 곳을 끌어 화면 이동 · 복사/잘라내기/붙여넣기 Ctrl(⌘)+C/X/V · 삭제 Delete · 되돌리기 Ctrl(⌘)+Z · 다시 실행 Ctrl(⌘)+Shift+Z</p>
+    <p class="board-view-hint touch-hint">부품을 고른 뒤 작업대를 누르세요. +로 확대하면 빈 곳을 끌어 이동할 수 있습니다.</p>
     <p id="simulation-error" class="board-measurement" role="status" hidden></p>
     <p id="flow-status" class="board-measurement" hidden></p>
     <p id="solve-status" class="board-measurement" role="status" hidden></p>
@@ -144,7 +147,14 @@
     <header class="board-bar">
       <div><p class="eyebrow">논리회로</p><strong id="logic-count">부품 0개 · 배선 0개</strong></div>
       <div class="board-actions"><button id="logic-delete" type="button" disabled>선택 삭제</button>
-        <button id="logic-clear" type="button" disabled>모두 지우기</button></div>
+        <button id="logic-clear" type="button" disabled>모두 지우기</button>
+        <button id="logic-cancel" type="button" hidden>취소</button>
+        <div id="logic-zoom" class="board-zoom" role="group" aria-label="논리회로 확대 및 축소">
+          <button data-zoom="out" type="button" aria-label="축소">−</button>
+          <button data-zoom="reset" type="button" aria-label="화면 초기화 (100%, 기본 위치)">초기화 · 100%</button>
+          <button data-zoom="in" type="button" aria-label="확대">+</button>
+        </div>
+      </div>
     </header>
     <div class="board-scroll">
       <svg id="logic-board" viewBox="0 0 960 480" aria-label="논리회로 조립 영역">
@@ -156,6 +166,7 @@
     </div>
     <div class="board-feedback logic-feedback">
       <p id="logic-status" class="board-status" role="status"></p>
+      <p class="board-view-hint touch-hint">부품을 고른 뒤 작업대를 누르세요. +로 확대하면 빈 곳을 끌어 이동할 수 있습니다.</p>
       <div class="logic-legend" aria-label="신호 색상">
         <span><i data-signal="1"></i>1 HIGH</span><span><i data-signal="0"></i>0 LOW</span><span><i data-signal="-1"></i>X 미정</span>
       </div>

@@ -1,3 +1,4 @@
+import { createBoardCamera } from "./board-camera.js";
 import { components, frequencyRange, groups, pinsFor } from "./components.js";
 import { pinCount, keyOf, measure } from "./circuit.js";
 import { createScope, scopeColors } from "./oscilloscope.js";
@@ -13,6 +14,8 @@ const draftPoints = byId("draft-points");
 const editor = byId("part-editor");
 const editorInput = byId("part-value");
 const readingTip = byId("board-reading");
+const editorReading = byId("editor-reading");
+const touchInput = matchMedia("(pointer: coarse)");
 const frequencyInput = byId("part-frequency");
 const boardScroll = board.parentElement;
 const inspector = byId("inspector");
@@ -33,9 +36,6 @@ const maxParts = 30;
 const maxWires = 60;
 const maxPoints = 12;
 const historyLimit = 100;
-const minZoom = 0.5;
-const maxZoom = 3;
-let camera = { zoom: 1, x: 0, y: 0 };
 let parts = [];
 let wires = [];
 const undoStack = [];
@@ -45,6 +45,7 @@ let nextId = 1;
 let placing = null;
 let paletteDrag = null;
 let suppressPaletteClick = false;
+let suppressBoardClick = false;
 let fallbackFullscreen = false;
 let selection = null;
 let pending = null;
@@ -63,7 +64,7 @@ let transientReading = null;
 const scope = createScope();
 const simulation = createSimulation(scope.sample, (reading) => {
   transientReading = reading;
-  refreshReadingTip();
+  refreshMeasurements();
   if (flowMode) refreshFlow();
   for (const part of parts) {
     if (!components[part.type].light) continue;
@@ -75,7 +76,7 @@ const simulation = createSimulation(scope.sample, (reading) => {
   simulationError.textContent = error.message;
   simulationError.hidden = false;
   draw();
-  refreshReadingTip();
+  refreshMeasurements();
 });
 
 function recordEdit() {
@@ -183,12 +184,10 @@ function terminalLabel(part, pin) {
   return components[part.type].labels?.[pin] ?? (pin ? "오른쪽" : "왼쪽");
 }
 
-function refreshReadingTip() {
-  if (!hovered) return;
+function measurementText({ part, wire, pin = null }) {
   const running = simulation.isRunning();
   const reading = running ? transientReading : simulationError.hidden ? readDC() : null;
   const volts = (end) => reading?.volts.get(keyOf(end));
-  const { part, wire, pin, clientX, clientY } = hovered;
   let label, voltage, amps, direction;
   if (wire) {
     label = `배선 ${wire.id}`;
@@ -222,7 +221,20 @@ function refreshReadingTip() {
   }
   const mode = running ? "실시간" : "DC";
   const current = number(amps === undefined ? undefined : amps * 1000, "mA");
-  const detail = [label + " · " + mode, voltage, "전류 " + current, direction].filter(Boolean).join("\n");
+  return [label + " · " + mode, voltage, "전류 " + current, direction].filter(Boolean).join("\n");
+}
+
+function refreshMeasurements() {
+  if (!editor.hidden && touchInput.matches) {
+    const wire = editorAnchor && wires.find(({ id }) => id === selection?.id);
+    if (editing || wire) {
+      const detail = measurementText({ part: editing, wire });
+      if (editorReading.textContent !== detail) editorReading.textContent = detail;
+    }
+  }
+  if (!hovered) return;
+  const detail = measurementText(hovered);
+  const { clientX, clientY } = hovered;
   if (readingTip.textContent !== detail) readingTip.textContent = detail;
   readingTip.hidden = false;
   const bounds = boardScroll.getBoundingClientRect();
@@ -245,7 +257,7 @@ board.addEventListener("pointermove", (event) => {
     pin: event.target.hasAttribute("data-terminal") ? Number(event.target.dataset.terminal) : null,
     clientX: event.clientX, clientY: event.clientY,
   };
-  refreshReadingTip();
+  refreshMeasurements();
 });
 board.addEventListener("pointerleave", hideReadingTip);
 board.addEventListener("pointerdown", hideReadingTip);
@@ -387,7 +399,7 @@ function drawInspector() {
 }
 
 function positionEditor() {
-  if (editor.hidden) return;
+  if (editor.hidden || getComputedStyle(editor).position === "static") return;
   const matrix = board.getScreenCTM();
   if (!matrix) return;
   const { x: anchorX, y: anchorY } = editing ?? editorAnchor;
@@ -400,6 +412,13 @@ function positionEditor() {
   const nextX = x + 55 <= maxX ? x + 55 : x - editor.offsetWidth - 55;
   editor.style.left = boardScroll.scrollLeft + Math.max(8, Math.min(maxX, nextX)) + "px";
   editor.style.top = boardScroll.scrollTop + Math.max(8, Math.min(maxY, y - 24)) + "px";
+}
+
+function showEditor() {
+  editor.hidden = false;
+  refreshMeasurements();
+  if (getComputedStyle(editor).position === "static") editor.scrollIntoView({ block: "nearest" });
+  else positionEditor();
 }
 
 function openEditor(part) {
@@ -424,8 +443,7 @@ function openEditor(part) {
   byId("scope-jump").hidden = part.type !== "scope";
   byId("rotate-part").hidden = false;
   byId("editor-delete").textContent = "부품 삭제";
-  editor.hidden = false;
-  positionEditor();
+  showEditor();
 }
 
 function openWireEditor(wire, anchor) {
@@ -439,8 +457,7 @@ function openWireEditor(wire, anchor) {
   editorInput.disabled = frequencyInput.disabled = true;
   byId("scope-jump").hidden = byId("rotate-part").hidden = true;
   byId("editor-delete").textContent = "배선 삭제";
-  editor.hidden = false;
-  positionEditor();
+  showEditor();
 }
 
 function closeEditor(restoreFocus = false) {
@@ -512,6 +529,7 @@ function draw() {
   drawDraft();
   partLayer.innerHTML = parts.map(partMarkup).join("");
   board.classList.toggle("placing", Boolean(placing));
+  byId("bench-cancel").hidden = !placing && !pending;
   for (const button of palette.querySelectorAll("button")) {
     button.setAttribute("aria-pressed", String(placing === button.dataset.type));
   }
@@ -547,48 +565,17 @@ function update() {
   syncSimulation();
   draw();
   scope.sync(parts);
+  refreshMeasurements();
 }
 
-function point(event) {
-  return new DOMPoint(event.clientX, event.clientY).matrixTransform(board.getScreenCTM().inverse());
-}
-
-function setCamera(zoom, x, y) {
-  const viewWidth = width / zoom;
-  const viewHeight = height / zoom;
-  const clamp = (position, extent) => Math.min(Math.max(0, extent), Math.max(Math.min(0, extent), position));
-  camera = { zoom, x: clamp(x, width - viewWidth), y: clamp(y, height - viewHeight) };
-  board.setAttribute("viewBox", `${camera.x} ${camera.y} ${viewWidth} ${viewHeight}`);
-  board.classList.toggle("is-zoomed", zoom > 1);
-  byId("zoom-reset").textContent = "초기화 · " + Math.round(zoom * 100) + "%";
-  hideReadingTip();
-  byId("zoom-out").disabled = zoom <= minZoom;
-  byId("zoom-in").disabled = zoom >= maxZoom;
-  positionEditor();
-}
-
-function zoomBy(factor, anchor = {
-  x: camera.x + width / (2 * camera.zoom),
-  y: camera.y + height / (2 * camera.zoom),
-}) {
-  if (drag || paletteDrag) return;
-  const zoom = Math.max(minZoom, Math.min(maxZoom, camera.zoom * factor));
-  const ratio = camera.zoom / zoom;
-  setCamera(zoom, anchor.x - (anchor.x - camera.x) * ratio, anchor.y - (anchor.y - camera.y) * ratio);
-}
-
-board.addEventListener("wheel", (event) => {
-  if (!event.deltaY || event.ctrlKey || event.metaKey) return;
-  event.preventDefault();
-  const factor = Math.exp(-Math.sign(event.deltaY) * Math.min(0.23, Math.abs(event.deltaY) * 0.008));
-  zoomBy(factor, point(event));
-}, { passive: false });
-byId("zoom-out").addEventListener("click", () => zoomBy(1 / 1.25));
-byId("zoom-in").addEventListener("click", () => zoomBy(1.25));
-byId("zoom-reset").addEventListener("click", () => {
-  setCamera(1, 0, 0);
-  boardScroll.scrollTo(0, 0);
-  positionEditor();
+const { view: camera, set: setCamera, point } = createBoardCamera(board, {
+  width, height,
+  controls: byId("zoom-reset").parentElement,
+  busy: () => Boolean(drag || paletteDrag),
+  onChange: () => {
+    hideReadingTip();
+    positionEditor();
+  },
 });
 byId("simulation-speed").addEventListener("change", (event) => {
   const speed = Number(event.target.value);
@@ -704,7 +691,7 @@ function dropPoint(event) {
 
 palette.addEventListener("pointerdown", (event) => {
   const button = event.target.closest("[data-type]");
-  if (!button || event.button !== 0 || paletteDrag) return;
+  if (!event.isPrimary || !button || event.button !== 0 || paletteDrag) return;
   suppressPaletteClick = false;
   paletteDrag = { type: button.dataset.type, pointer: event.pointerId, x: event.clientX, y: event.clientY, moved: false };
   button.setPointerCapture(event.pointerId);
@@ -763,7 +750,7 @@ palette.addEventListener("click", (event) => {
   closeEditor();
   placing = placing === button.dataset.type ? null : button.dataset.type;
   pending = null;
-  status.textContent = placing ? "작업대에서 원하는 위치를 클릭하거나 Enter를 눌러 배치하세요." : defaultStatus;
+  status.textContent = placing ? "작업대에서 원하는 위치를 누르거나 Enter로 배치하세요." : defaultStatus;
   draw();
 });
 function bearing(part, x, y) {
@@ -771,7 +758,7 @@ function bearing(part, x, y) {
 }
 
 board.addEventListener("pointerdown", (event) => {
-  if (drag || placing || paletteDrag) return;
+  if (!event.isPrimary || drag || placing || paletteDrag) return;
   const panOnEmpty = event.button === 0 && event.target === boardSurface && !pending;
   if (camera.zoom > 1 && (event.button === 1 || panOnEmpty)) {
     const matrix = board.getScreenCTM();
@@ -860,6 +847,8 @@ board.addEventListener("pointerleave", () => drawDraft());
 
 function finishDrag(event, cancelled = false) {
   if (drag?.pointer !== event.pointerId) return;
+  // Touch can send a click to the newly drawn surface after pointerup.
+  suppressBoardClick = !cancelled;
   if (drag.camera) {
     const previous = drag;
     drag = null;
@@ -899,7 +888,9 @@ function finishDrag(event, cancelled = false) {
 board.addEventListener("pointerup", (event) => finishDrag(event));
 board.addEventListener("pointercancel", (event) => finishDrag(event, true));
 board.addEventListener("lostpointercapture", (event) => finishDrag(event, true));
+board.addEventListener("pointerdown", () => { suppressBoardClick = false; }, true);
 board.addEventListener("click", (event) => {
+  if (suppressBoardClick && event.detail) return;
   if (placing) {
     const position = dropPoint(event);
     if (position) place(position.x, position.y);
@@ -915,6 +906,12 @@ board.addEventListener("click", (event) => {
   } else if (event.target !== board) {
     activate(event.target, point(event));
   }
+});
+byId("bench-cancel").addEventListener("click", () => {
+  pending = placing = null;
+  bends = [];
+  status.textContent = defaultStatus;
+  draw();
 });
 document.addEventListener("keydown", (event) => {
   if (byId("bench").hidden) return;

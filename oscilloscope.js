@@ -79,14 +79,21 @@ export function createScope() {
     tooltip.style.top = Math.max(4, anchor.y - chartBounds.top + 8) + "px";
   }
 
-  plot.addEventListener("pointermove", (event) => {
+  function moveCursor(event) {
     pointer = new DOMPoint(event.clientX, event.clientY);
     drawCursor();
-  });
-  plot.addEventListener("pointerleave", () => {
+  }
+
+  plot.addEventListener("pointermove", moveCursor);
+  plot.addEventListener("click", moveCursor);
+  function clearCursor() {
     pointer = null;
     hideCursor();
+  }
+  plot.addEventListener("pointerleave", (event) => {
+    if (event.pointerType !== "touch") clearCursor();
   });
+  plot.addEventListener("pointercancel", clearCursor);
   let channels = [];
   let samples = [];
   let time = 0;
