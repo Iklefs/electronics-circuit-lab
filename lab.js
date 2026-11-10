@@ -116,10 +116,10 @@ function restore() {
   notes.value = "";
   status.textContent = "";
   sharePanel.hidden = true;
-  if (location.hash) {
+  if (location.hash.startsWith("#lab=")) {
     try {
       const payload = location.hash.slice(5);
-      if (!location.hash.startsWith("#lab=") || payload.length > 5000) throw new Error();
+      if (payload.length > 5000) throw new Error();
       const bytes = Uint8Array.from(atob(payload.replaceAll("-", "+").replaceAll("_", "/")), (char) => char.charCodeAt(0));
       const saved = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
       if (saved.version !== 1 || !validSettings(saved.current) ||
@@ -181,5 +181,7 @@ byId("copy").addEventListener("click", async () => {
     status.textContent = "선택된 링크를 복사해 주세요.";
   }
 });
-window.addEventListener("hashchange", restore);
+window.addEventListener("hashchange", () => {
+  if (location.hash.startsWith("#lab=")) restore();
+});
 restore();
