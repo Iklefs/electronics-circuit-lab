@@ -207,3 +207,33 @@ body.workbench-expanded{overflow:hidden}
 #board.placing #board-surface,.placing-by-drag #board #board-surface{cursor:crosshair}
 #board.panning,#board.panning #board-surface{cursor:grabbing}
 .flow-stream{animation-duration:var(--flow-period,.7s)}
+
+#logic-workbench{max-width:1600px;padding-top:1.5rem}
+#logic-board{display:block;width:100%;min-width:580px;min-height:300px}
+#logic-board.placing{cursor:crosshair}
+.logic-empty{position:absolute;inset:0;display:grid;place-content:center;text-align:center;color:#b8cbe8;pointer-events:none}
+.logic-empty p{margin:.3rem 0;font-size:.8rem}
+.logic-feedback,.logic-legend{display:flex;align-items:center;flex-wrap:wrap;gap:.4rem .9rem}
+.logic-feedback{justify-content:space-between}
+.logic-legend{color:#c9dafa;font-size:.74rem}
+.logic-legend span{display:flex;gap:.25rem;align-items:center;white-space:nowrap}
+.logic-legend i{width:8px;height:8px;border-radius:100%;background:var(--signal,#a2aec5)}
+#logic-workbench [data-signal="1"]{--signal:#73ecc5}
+#logic-workbench [data-signal="0"]{--signal:#8aaff8}
+#logic-workbench [data-signal="-1"]{--signal:#a2aec5}
+.logic-body,.logic-pin,.logic-toggle{outline:none;touch-action:none}
+.logic-body{cursor:grab}
+.logic-body rect{fill:#203752;stroke:#6584ae;stroke-width:1.5}
+.logic-body:focus-visible rect,.logic-part.selected .logic-body rect{stroke:#ffe298;stroke-width:2.4}
+.logic-name,.logic-value,.logic-toggle text{fill:#edf4ff;text-anchor:middle;font-size:14px;font-weight:750;pointer-events:none}
+.logic-value{fill:var(--signal);font-size:16px}
+.logic-stub{fill:none;stroke:#829ac0;stroke-width:2.2;pointer-events:none}
+.logic-pin{fill:#14243b;stroke:var(--signal);stroke-width:2.4;cursor:crosshair}
+.logic-pin.pending,.logic-pin:hover,.logic-pin:focus-visible{fill:#ffe298;stroke:#fff4ca}
+.logic-toggle{cursor:pointer}
+.logic-toggle rect{fill:#152941;stroke:var(--signal);stroke-width:1.4}
+.logic-toggle:focus-visible rect,.logic-toggle:hover rect{stroke:#ffe298;stroke-width:2}
+.logic-toggle text{fill:var(--signal)}
+.logic-signal,#logic-draft{fill:none;stroke:var(--signal,#c9e1ff);stroke-width:3;stroke-linecap:round;pointer-events:none}
+.logic-wire.selected .logic-signal,.logic-wire:focus-visible .logic-signal{stroke:#ffe298;stroke-width:4}
+.logic-signal[data-signal="-1"],#logic-draft{stroke-dasharray:5 4}

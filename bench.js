@@ -2,7 +2,6 @@ import { components, frequencyRange, groups, pinsFor } from "./components.js";
 import { pinCount, keyOf, measure } from "./circuit.js";
 import { createScope, scopeColors } from "./oscilloscope.js";
 import { createSimulation, isTimeDependent } from "./simulation.js";
-import { wireCurrents } from "./wire-currents.js";
 
 const byId = (id) => document.getElementById(id);
 const board = byId("board");
@@ -209,7 +208,7 @@ function refreshFlow() {
   if (!flowMode) return;
   const running = simulation.isRunning();
   const reading = running ? transientReading : dcReading;
-  const currents = reading ? wireCurrents(parts, wires, reading) : null;
+  const currents = reading?.wireCurrents;
   let moving = 0;
   let unknown = 0;
   for (const wire of wireLayer.children) {
@@ -949,10 +948,13 @@ function route() {
     }
     if (document.fullscreenElement === workbench) document.exitFullscreen().catch(syncFullscreen);
   }
-  byId("bench").hidden = rc;
+  const logic = hash === "#logic" || hash.startsWith("#logic=");
+  byId("logic-workbench").hidden = !logic;
+  byId("open-logic").setAttribute("aria-current", logic ? "page" : "false");
+  byId("bench").hidden = rc || logic;
   byId("rc-lab").hidden = !rc;
   byId("share").hidden = !rc;
-  byId("open-bench").setAttribute("aria-current", rc ? "false" : "page");
+  byId("open-bench").setAttribute("aria-current", (rc || logic) ? "false" : "page");
   if (rc || !hash.startsWith("#bench=") || hash === loadedHash) {
     syncSimulation();
     return;

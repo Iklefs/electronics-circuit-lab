@@ -7,9 +7,10 @@
 <link rel="stylesheet" href="style.css">
 <script type="module" src="./lab.js"></script>
 <script type="module" src="./bench.js"></script>
+<script type="module" src="./logic-workbench.js"></script>
 </head>
 <body>
-<header class="top"><a class="brand" href="./"><span class="logo" aria-hidden="true">⌁</span> 회로 실험실</a><nav class="lab-nav" aria-label="실험 공간"><a id="open-bench" href="#bench">회로 작업대</a></nav><button id="share" class="primary" hidden type="button">↗ 실험 공유</button></header>
+<header class="top"><a class="brand" href="./"><span class="logo" aria-hidden="true">⌁</span> 회로 실험실</a><nav class="lab-nav" aria-label="실험 공간"><a id="open-bench" href="#bench">회로 작업대</a><a id="open-logic" href="#logic">논리회로 작업대</a></nav><button id="share" class="primary" hidden type="button">↗ 실험 공유</button></header>
 <main id="bench">
 <div class="bench-heading"><div><p class="eyebrow">전자공학 실험실</p><h1>회로 작업대</h1><p>부품을 놓고, 단자를 연결하고, 전기가 어떻게 흐르는지 확인하세요.</p></div>
 <button id="bench-share" class="primary" type="button">↗ 회로 공유</button></div>
@@ -123,6 +124,42 @@
   <div id="scope-readings" class="legend"></div>
 </section>
 </div>
+</main>
+<main id="logic-workbench" hidden>
+  <div class="bench-heading">
+    <div><p class="eyebrow">디지털 실험실</p><h1>논리회로 작업대</h1>
+    <p>입력 스위치를 바꾸고, 신호가 게이트를 거쳐 출력되는 모습을 확인하세요.</p></div>
+    <button id="logic-share" class="primary" type="button">↗ 회로 공유</button>
+  </div>
+  <section id="logic-share-panel" class="card share-panel" hidden aria-label="논리회로 공유">
+    <label for="logic-link">논리회로 공유 링크</label>
+    <div class="link-row"><input id="logic-link" readonly><button id="logic-copy" type="button">복사</button></div>
+  </section>
+  <section class="component-ribbon" aria-label="논리회로 부품">
+    <div class="ribbon-header"><h2>부품</h2><button id="logic-example" type="button">반가산기 예제</button></div>
+    <div id="logic-palette" class="palette"><div class="palette-group"></div></div>
+  </section>
+  <section class="board" aria-label="논리회로 캔버스">
+    <header class="board-bar">
+      <div><p class="eyebrow">논리회로</p><strong id="logic-count">부품 0개 · 배선 0개</strong></div>
+      <div class="board-actions"><button id="logic-delete" type="button" disabled>선택 삭제</button>
+        <button id="logic-clear" type="button" disabled>모두 지우기</button></div>
+    </header>
+    <div class="board-scroll">
+      <svg id="logic-board" viewBox="0 0 960 480" aria-label="논리회로 조립 영역">
+        <defs><pattern id="logic-grid" width="20" height="20" patternUnits="userSpaceOnUse"><circle r="1.3" fill="#506681"/></pattern></defs>
+        <rect id="logic-surface" width="960" height="480" fill="url(#logic-grid)"/>
+        <g id="logic-wires"></g><path id="logic-draft" hidden/><g id="logic-parts"></g>
+      </svg>
+      <div id="logic-empty" class="logic-empty"><strong>빈 논리회로</strong><p>위에서 부품을 끌어 놓거나 반가산기 예제를 여세요.</p></div>
+    </div>
+    <div class="board-feedback logic-feedback">
+      <p id="logic-status" class="board-status" role="status"></p>
+      <div class="logic-legend" aria-label="신호 색상">
+        <span><i data-signal="1"></i>1 HIGH</span><span><i data-signal="0"></i>0 LOW</span><span><i data-signal="-1"></i>X 미정</span>
+      </div>
+    </div>
+  </section>
 </main>
 <main id="rc-lab" hidden>
 <div class="intro"><p class="eyebrow">회로 기초 / 실험 01</p><h1>RC 충전과 방전</h1><p>저항과 커패시터를 바꿔 전압이 시간에 따라 어떻게 변하는지 살펴보세요.</p></div>

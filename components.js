@@ -5,13 +5,6 @@ const capacitor = "M-50 0h43m14 0h43 M-7-18v36m14-36v36";
 const diode = "M-50 0h38m24 0h38 M-12-16v32l24-16z M12-17v34";
 
 export const frequencyRange = { min: 0.1, max: 500, initial: 5 };
-export const sourceWave = (shape, phase) => {
-  const cycle = phase - Math.floor(phase);
-  if (shape === "square") return cycle < 0.5 ? 1 : -1;
-  if (shape === "triangle") return 1 - 4 * Math.abs(((cycle + 0.25) % 1) - 0.5);
-  return Math.sin(2 * Math.PI * cycle);
-};
-
 function generator(name, icon, shape, path) {
   return {
     name, icon, shape, group: 0, model: "voltage", value: 5, unit: "V", label: "최대 진폭",

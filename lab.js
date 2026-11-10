@@ -1,4 +1,4 @@
-"use strict";
+import { rcTimeConstant, rcVoltage } from "./wasm-engine.js";
 
 const byId = (id) => document.getElementById(id);
 const parameters = ["r", "c", "v"];
@@ -13,7 +13,7 @@ const status = byId("status");
 const defaults = { r: 10, c: 100, v: 5, mode: "charge" };
 let reference = null;
 
-const timeConstant = ({ r, c }) => r * c / 1000;
+const timeConstant = ({ r, c }) => rcTimeConstant(r, c);
 const number = (value) => Number(value.toPrecision(3)).toString();
 
 function readControls() {
@@ -58,8 +58,8 @@ function drawPlot(current) {
       if (t < endTime) points.add(t);
     }
     return [...points].sort((a, b) => a - b).map((t, index) => {
-      const fraction = settings.mode === "charge" ? -Math.expm1(-t / tau) : Math.exp(-t / tau);
-      return (index === 0 ? "M" : "L") + x(t).toFixed(2) + " " + y(settings.v * fraction).toFixed(2);
+      const voltage = rcVoltage(settings.v, t, tau, settings.mode === "charge");
+      return (index === 0 ? "M" : "L") + x(t).toFixed(2) + " " + y(voltage).toFixed(2);
     }).join(" ");
   };
   const horizontal = Array.from({ length: 5 }, (_, index) => {
@@ -71,7 +71,7 @@ function drawPlot(current) {
     return `<path d="M${x(t)} ${top}v${height}"/><text x="${x(t)}" y="${bottom + 21}" text-anchor="middle">${number(t)}</text>`;
   }).join("");
   const tau = timeConstant(current);
-  const tauVoltage = current.v * (current.mode === "charge" ? 1 - Math.exp(-1) : Math.exp(-1));
+  const tauVoltage = rcVoltage(current.v, tau, tau, current.mode === "charge");
   const modeName = current.mode === "charge" ? "충전" : "방전";
   plot.innerHTML = `
     <title id="plot-description">${modeName} 곡선. 시정수 ${number(tau)}초, 시정수에서 전압 ${number(tauVoltage)}볼트.${reference ? " 저장 파형과 비교 중입니다." : ""}</title>
@@ -95,7 +95,6 @@ function render() {
   for (const name of parameters) {
     byId(name + "-value").value = current[name] + " " + units[name];
   }
-  byId("tau").textContent = number(timeConstant(current)) + " s";
   byId("v-label").textContent = charging ? "공급 전압 Vₛ" : "초기 전압 V₀";
   byId("formula").textContent = charging ? "V꜀(t) = Vₛ × (1 − e^(−t/τ))" : "V꜀(t) = V₀ × e^(−t/τ)";
   byId("checkpoint").textContent = charging
@@ -107,7 +106,12 @@ function render() {
     byId("reference-description").textContent = `저장 파형 · ${mode} · ${reference.r} kΩ · ${reference.c} µF · ${reference.v} V`;
   }
   byId("note-count").textContent = notes.value.length + " / 400";
-  drawPlot(current);
+  try {
+    byId("tau").textContent = number(timeConstant(current)) + " s";
+    drawPlot(current);
+  } catch (error) {
+    status.textContent = error.message;
+  }
 }
 
 function restore() {

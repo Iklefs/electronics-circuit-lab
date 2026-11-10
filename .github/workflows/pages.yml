@@ -25,6 +25,7 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      - run: rustup target add wasm32-unknown-unknown
       - run: npm ci
       - run: npm run build
       - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6

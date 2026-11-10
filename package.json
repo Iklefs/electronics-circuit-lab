@@ -4,9 +4,12 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "predev": "npm run build:engine",
+    "prebuild": "npm run build:engine",
     "dev": "vite",
     "build": "vite build --base ./",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "build:engine": "node scripts/build-engine.mjs"
   },
   "devDependencies": {
     "vite": "8.2.2"
