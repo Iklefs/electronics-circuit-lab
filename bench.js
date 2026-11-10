@@ -32,11 +32,15 @@ const height = 520;
 const maxParts = 30;
 const maxWires = 60;
 const maxPoints = 12;
+const historyLimit = 100;
 const minZoom = 0.5;
 const maxZoom = 3;
 let camera = { zoom: 1, x: 0, y: 0 };
 let parts = [];
 let wires = [];
+const undoStack = [];
+const redoStack = [];
+let checkpoint = JSON.stringify({ parts, wires });
 let nextId = 1;
 let placing = null;
 let paletteDrag = null;
@@ -73,6 +77,30 @@ const simulation = createSimulation(scope.sample, (reading) => {
   draw();
   refreshReadingTip();
 });
+
+function recordEdit() {
+  const next = JSON.stringify({ parts, wires });
+  if (next === checkpoint) return;
+  undoStack.push(checkpoint);
+  if (undoStack.length > historyLimit) undoStack.shift();
+  checkpoint = next;
+  redoStack.length = 0;
+}
+
+function restoreEdit(redo) {
+  const from = redo ? redoStack : undoStack;
+  const to = redo ? undoStack : redoStack;
+  if (drag || paletteDrag || !from.length) return;
+  to.push(checkpoint);
+  checkpoint = from.pop();
+  ({ parts, wires } = JSON.parse(checkpoint));
+  closeEditor();
+  selection = pending = placing = null;
+  bends = [];
+  update();
+  board.focus({ preventScroll: true });
+  status.textContent = redo ? "회로 편집을 다시 실행했습니다." : "회로 편집을 되돌렸습니다.";
+}
 
 paletteGroups.innerHTML = groups.map((group, index) =>
   `<button type="button" data-group="${index}" aria-pressed="${index === 0}">${group}</button>`
@@ -431,6 +459,7 @@ editor.addEventListener("submit", (event) => {
     editing.frequency = frequencyInput.valueAsNumber;
   }
   editing.value = editorInput.valueAsNumber;
+  recordEdit();
   const id = editing.id;
   closeEditor();
   update();
@@ -446,6 +475,7 @@ byId("editor-close").addEventListener("click", () => closeEditor(true));
 byId("rotate-part").addEventListener("click", () => {
   if (!editing) return;
   editing.angle = (editing.angle + 90) % 360;
+  recordEdit();
   update();
 });
 boardScroll.addEventListener("scroll", positionEditor);
@@ -454,6 +484,7 @@ new ResizeObserver(positionEditor).observe(boardScroll);
 function toggleSwitch(id) {
   const part = parts.find((item) => item.id === id);
   part.value = part.value ? 0 : 1;
+  recordEdit();
   closeEditor();
   selection = { kind: "part", id };
   update();
@@ -593,6 +624,7 @@ function canPlace(type) {
 function place(x, y) {
   if (!canPlace(placing)) return;
   const part = addPart(placing, x, y);
+  recordEdit();
   selection = { kind: "part", id: part.id };
   placing = null;
   update();
@@ -632,6 +664,7 @@ function connect(id, pin) {
   } else {
     const wire = { id: nextId++, a: pending, b: end, points: bends };
     wires.push(wire);
+    recordEdit();
     selection = { kind: "wire", id: wire.id };
     status.textContent = "배선을 연결했습니다.";
   }
@@ -837,6 +870,7 @@ function finishDrag(event, cancelled = false) {
   }
   if (drag.wire) {
     if (cancelled) drag.wire.points[drag.index] = drag.start;
+    else recordEdit();
     drag = null;
     draw();
     return;
@@ -856,6 +890,7 @@ function finishDrag(event, cancelled = false) {
   }
   selection = { kind: "part", id: part.id };
   pending = null;
+  if (moved) recordEdit();
   status.textContent = !moved ? defaultStatus : pin === null ? "부품 위치를 바꿨습니다." :
     `부품을 ${part.angle}°로 회전했습니다.`;
   draw();
@@ -892,7 +927,14 @@ document.addEventListener("keydown", (event) => {
     closeEditor(true);
     return;
   }
-  if (isTextEditing(event.target) || event.ctrlKey || event.metaKey || event.altKey) return;
+  if (isTextEditing(event.target) || event.isComposing || event.altKey) return;
+  if (event.ctrlKey || event.metaKey) {
+    if (event.key.toLowerCase() === "z" || event.code === "KeyZ") {
+      event.preventDefault();
+      restoreEdit(event.shiftKey);
+    }
+    return;
+  }
   if (event.key === "Backspace" && pending && bends.length) {
     event.preventDefault();
     bends.pop();
@@ -976,6 +1018,7 @@ document.addEventListener("paste", (event) => {
     !parts.some((part) => Math.abs(part.x - a) < 85 && Math.abs(part.y - b) < 65)) ?? [(camera.x + right) / 2, (camera.y + bottom) / 2];
   const part = addPart(type, left, top);
   Object.assign(part, { value, angle, ...(spec.shape ? { frequency } : {}) });
+  recordEdit();
   closeEditor();
   selection = { kind: "part", id: part.id };
   placing = pending = null;
@@ -996,6 +1039,7 @@ function deleteSelection() {
   } else {
     wires = wires.filter((wire) => wire.id !== id);
   }
+  recordEdit();
   selection = pending = null;
   bends = [];
   update();
@@ -1004,9 +1048,11 @@ function deleteSelection() {
 }
 byId("editor-delete").addEventListener("click", deleteSelection);
 byId("clear-board").addEventListener("click", () => {
+  if (drag || paletteDrag) return;
   closeEditor();
   parts = [];
   wires = [];
+  recordEdit();
   simulation.reset();
   scope.clear();
   selection = pending = placing = null;
@@ -1062,6 +1108,7 @@ function addWaveExample(kind) {
     status.textContent = "스위치를 A로 바꾸면 충전, B로 바꾸면 방전됩니다.";
   }
   byId("scope-window").value = ac ? "0.2" : "5";
+  recordEdit();
   selection = pending = placing = null;
   live = false;
   simulation.reset();
@@ -1088,6 +1135,7 @@ byId("example").addEventListener("click", () => {
     [[lamp.id, 1], [toggle.id, 0]], [[toggle.id, 1], [source.id, 1]],
     [[source.id, 1], [ground.id, 0]],
   ]) wires.push({ id: nextId++, a, b });
+  recordEdit();
   selection = { kind: "part", id: toggle.id };
   pending = placing = null;
   live = true;
@@ -1192,6 +1240,8 @@ function route() {
     scope.clear();
     parts = [...loadedParts.values()];
     wires = loadedWires;
+    undoStack.length = redoStack.length = 0;
+    checkpoint = JSON.stringify({ parts, wires });
     nextId = Math.max(0, ...ids) + 1;
     selection = pending = placing = null;
     live = true;
