@@ -6,6 +6,7 @@ import { wireCurrents } from "./wire-currents.js";
 
 const byId = (id) => document.getElementById(id);
 const board = byId("board");
+const boardSurface = byId("board-surface");
 const partLayer = byId("part-layer");
 const wireLayer = byId("wire-layer");
 const wirePreview = byId("wire-preview");
@@ -31,6 +32,9 @@ const height = 520;
 const maxParts = 30;
 const maxWires = 60;
 const maxPoints = 12;
+const minZoom = 0.5;
+const maxZoom = 3;
+let camera = { zoom: 1, x: 0, y: 0 };
 let parts = [];
 let wires = [];
 let nextId = 1;
@@ -411,6 +415,44 @@ function point(event) {
   return new DOMPoint(event.clientX, event.clientY).matrixTransform(board.getScreenCTM().inverse());
 }
 
+function setCamera(zoom, x, y) {
+  const viewWidth = width / zoom;
+  const viewHeight = height / zoom;
+  const clamp = (position, extent) => Math.min(Math.max(0, extent), Math.max(Math.min(0, extent), position));
+  camera = { zoom, x: clamp(x, width - viewWidth), y: clamp(y, height - viewHeight) };
+  board.setAttribute("viewBox", `${camera.x} ${camera.y} ${viewWidth} ${viewHeight}`);
+  board.classList.toggle("is-zoomed", zoom > 1);
+  byId("zoom-reset").textContent = Math.round(zoom * 100) + "%";
+  byId("zoom-out").disabled = zoom <= minZoom;
+  byId("zoom-in").disabled = zoom >= maxZoom;
+  positionEditor();
+}
+
+function zoomBy(factor, anchor = {
+  x: camera.x + width / (2 * camera.zoom),
+  y: camera.y + height / (2 * camera.zoom),
+}) {
+  if (drag || paletteDrag) return;
+  const zoom = Math.max(minZoom, Math.min(maxZoom, camera.zoom * factor));
+  const ratio = camera.zoom / zoom;
+  setCamera(zoom, anchor.x - (anchor.x - camera.x) * ratio, anchor.y - (anchor.y - camera.y) * ratio);
+}
+
+board.addEventListener("wheel", (event) => {
+  if (!event.deltaY || event.ctrlKey || event.metaKey) return;
+  event.preventDefault();
+  const factor = Math.exp(-Math.sign(event.deltaY) * Math.min(0.23, Math.abs(event.deltaY) * 0.008));
+  zoomBy(factor, point(event));
+}, { passive: false });
+byId("zoom-out").addEventListener("click", () => zoomBy(1 / 1.25));
+byId("zoom-in").addEventListener("click", () => zoomBy(1.25));
+byId("zoom-reset").addEventListener("click", () => setCamera(1, 0, 0));
+byId("simulation-speed").addEventListener("change", (event) => {
+  const speed = Number(event.target.value);
+  simulation.setSpeed(speed);
+  board.style.setProperty("--flow-period", `${0.7 / speed}s`);
+});
+
 function move(part, x, y) {
   part.x = Math.max(60, Math.min(width - 60, Math.round(x / 10) * 10));
   part.y = Math.max(60, Math.min(height - 80, Math.round(y / 10) * 10));
@@ -578,7 +620,17 @@ function bearing(part, x, y) {
 }
 
 board.addEventListener("pointerdown", (event) => {
-  if (event.button !== 0 || placing || drag || event.target.closest("[data-switch]")) return;
+  if (drag || placing || paletteDrag) return;
+  const panOnEmpty = event.button === 0 && event.target === boardSurface && !pending;
+  if (camera.zoom > 1 && (event.button === 1 || panOnEmpty)) {
+    const matrix = board.getScreenCTM();
+    drag = { camera: { ...camera }, clientX: event.clientX, clientY: event.clientY,
+      scale: matrix.a, pointer: event.pointerId, moved: false, panOnEmpty };
+    if (event.button === 1) event.preventDefault();
+    board.setPointerCapture(event.pointerId);
+    return;
+  }
+  if (event.button !== 0 || event.target.closest("[data-switch]")) return;
   const handle = event.target.closest("[data-bend]");
   if (handle) {
     const wire = wires.find(({ id }) => id === Number(handle.closest("[data-wire]").dataset.wire));
@@ -602,6 +654,16 @@ board.addEventListener("pointerdown", (event) => {
 });
 board.addEventListener("pointermove", (event) => {
   if (!drag && !pending) return;
+  if (drag?.camera) {
+    if (drag.pointer !== event.pointerId) return;
+    const dx = event.clientX - drag.clientX;
+    const dy = event.clientY - drag.clientY;
+    if (!drag.moved && Math.hypot(dx, dy) < 4) return;
+    drag.moved = true;
+    board.classList.add("panning");
+    setCamera(drag.camera.zoom, drag.camera.x - dx / drag.scale, drag.camera.y - dy / drag.scale);
+    return;
+  }
   const { x, y } = point(event);
   if (!drag) {
     if (pending) {
@@ -647,6 +709,14 @@ board.addEventListener("pointerleave", () => drawDraft());
 
 function finishDrag(event, cancelled = false) {
   if (drag?.pointer !== event.pointerId) return;
+  if (drag.camera) {
+    const previous = drag;
+    drag = null;
+    board.classList.remove("panning");
+    if (cancelled) setCamera(previous.camera.zoom, previous.camera.x, previous.camera.y);
+    else if (!previous.moved && previous.panOnEmpty) activate(boardSurface);
+    return;
+  }
   if (drag.wire) {
     if (cancelled) drag.wire.points[drag.index] = drag.start;
     drag = null;
@@ -680,7 +750,7 @@ board.addEventListener("click", (event) => {
   if (placing) {
     const position = dropPoint(event);
     if (position) place(position.x, position.y);
-  } else if (pending && event.target === byId("board-surface")) {
+  } else if (pending && event.target === boardSurface) {
     if (bends.length === maxPoints) {
       status.textContent = `배선 하나에 경유점을 최대 ${maxPoints}개까지 추가할 수 있습니다.`;
       return;

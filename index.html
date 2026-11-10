@@ -39,6 +39,16 @@
 <section class="board" aria-label="회로 캔버스">
   <header class="board-bar"><div><p class="eyebrow">회로도</p><strong id="bench-count">부품 0개 · 배선 0개</strong></div>
   <div class="board-actions">
+    <label class="board-speed">시간 배율
+      <select id="simulation-speed">
+        <option value="0.1">0.1×</option>
+        <option value="0.25">0.25×</option>
+        <option value="0.5">0.5×</option>
+        <option value="1" selected>1×</option>
+        <option value="2">2×</option>
+        <option value="4">4×</option>
+      </select>
+    </label>
     <button id="simulate" type="button" aria-pressed="false">DC 측정</button>
     <button id="simulation-reset" type="button" hidden>회로 재시작</button>
     <div id="flow-controls" class="flow-controls" role="group" aria-label="배선 흐름 표시">
@@ -47,6 +57,11 @@
     </div>
     <button id="delete" type="button" disabled>선택 삭제</button>
     <button id="clear-board" type="button" disabled>모두 지우기</button>
+    <div class="board-zoom" role="group" aria-label="회로도 확대 및 축소">
+      <button id="zoom-out" type="button" aria-label="축소">−</button>
+      <button id="zoom-reset" type="button" aria-label="배율 100%로 초기화" title="배율 초기화">100%</button>
+      <button id="zoom-in" type="button" aria-label="확대">+</button>
+    </div>
     <button id="fullscreen" type="button" aria-pressed="false"><span aria-hidden="true">⛶</span> <span id="fullscreen-label">전체화면</span></button>
   </div></header>
   <div class="board-scroll">
@@ -70,6 +85,7 @@
   </div>
   <div class="board-feedback">
     <p id="bench-status" class="board-status" role="status">단자에서 시작해 빈 곳을 클릭하면 배선 경유점을 추가할 수 있습니다.</p>
+    <p class="board-view-hint">마우스 휠로 확대·축소 · 확대 후 빈 곳을 끌어 화면 이동</p>
     <p id="simulation-error" class="board-measurement" role="status" hidden></p>
     <p id="flow-status" class="board-measurement" hidden></p>
     <p id="solve-status" class="board-measurement" role="status" hidden></p>

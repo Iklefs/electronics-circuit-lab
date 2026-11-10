@@ -196,3 +196,14 @@ body.workbench-expanded{overflow:hidden}
 #placement-preview rect{fill:#2b4770;stroke:#bfd7ff;stroke-width:2;stroke-dasharray:4 3}
 #placement-preview path{fill:none;stroke:#e7f1ff;stroke-width:2.5;stroke-linecap:round;stroke-linejoin:round}
 #placement-preview text{fill:#e7f1ff;stroke:#14243b;stroke-width:3;paint-order:stroke;text-anchor:middle;font-size:13px;font-weight:700}
+
+.board-speed,.board-zoom{display:flex;align-items:center;gap:.2rem;font-size:.75rem;white-space:nowrap}
+.board-speed{gap:.35rem;color:#d5e3f6}
+.board-speed select{font:inherit;color:#e4eeff;background:#1b2e48;border:1px solid #415671;border-radius:8px;padding:.32rem}
+.board-zoom button{font-variant-numeric:tabular-nums}
+.board-zoom #zoom-reset{min-width:3.4rem}
+.board-view-hint{margin:.15rem 0 0;font-size:.72rem;color:#9eb3d0}
+#board.is-zoomed #board-surface{cursor:grab;touch-action:none}
+#board.placing #board-surface,.placing-by-drag #board #board-surface{cursor:crosshair}
+#board.panning,#board.panning #board-surface{cursor:grabbing}
+.flow-stream{animation-duration:var(--flow-period,.7s)}

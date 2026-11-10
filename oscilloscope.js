@@ -4,6 +4,9 @@ export const scopeColors = ["#72efd6", "#ffd18c", "#b6baff", "#fc9db6"];
 const byId = (id) => document.getElementById(id);
 const format = (value) => Number(value.toPrecision(4)).toString();
 const cursorTime = new Intl.NumberFormat("ko-KR", { maximumFractionDigits: 5, useGrouping: false });
+const minVoltageRange = 0.01;
+const voltageForDisplay = (voltage) => Math.abs(voltage) < 1e-6 ? 0 : voltage;
+const formatVoltage = (voltage) => Number.isFinite(voltage) ? format(voltageForDisplay(voltage)) + " V" : "미측정";
 const bounds = { left: 66, right: 800, top: 20, bottom: 233 };
 
 function nearestSample(samples, time) {
@@ -63,7 +66,7 @@ export function createScope() {
 
     const values = channels.map(({ id }, index) => {
       const voltage = sample.values[id];
-      return `<div><span><i class="dot" style="--channel:${scopeColors[index]}"></i>CH${index + 1}</span><b>${Number.isFinite(voltage) ? format(voltage) + " V" : "미측정"}</b></div>`;
+      return `<div><span><i class="dot" style="--channel:${scopeColors[index]}"></i>CH${index + 1}</span><b>${formatVoltage(voltage)}</b></div>`;
     }).join("");
     tooltip.innerHTML = `<strong>${cursorTime.format(sample.time)} s</strong>${values}`;
     tooltip.hidden = false;
@@ -95,13 +98,13 @@ export function createScope() {
     const start = Math.max(0, time - span);
     const shown = samples.filter((sample) => sample.time >= start);
     const voltages = shown.flatMap(({ values }) => channels.map(({ id }) => values[id]).filter(Number.isFinite));
-    const peak = Math.max(0, ...voltages.map(Math.abs));
-    const step = 10 ** Math.floor(Math.log10(peak || 1));
-    const limit = peak ? Math.ceil(peak / step) * step : 1;
-    const low = voltages.some((value) => value < -1e-7) ? -limit : 0;
+    const peak = Math.max(minVoltageRange, ...voltages.map(Math.abs));
+    const step = 10 ** Math.floor(Math.log10(peak));
+    const limit = Math.ceil(peak / step) * step;
+    const low = voltages.some((value) => voltageForDisplay(value) < 0) ? -limit : 0;
     const { left, right, top, bottom } = bounds;
     const x = (t) => left + (right - left) * (t - start) / span;
-    const y = (v) => bottom - (bottom - top) * (v - low) / (limit - low);
+    const y = (v) => bottom - (bottom - top) * (voltageForDisplay(v) - low) / (limit - low);
     viewport = { shown, start, span, x, y };
     const grid = [];
     for (let index = 0; index <= 5; index += 1) {
@@ -129,7 +132,7 @@ export function createScope() {
       <text x="8" y="14">전압 (V)</text><text x="433" y="273" text-anchor="middle">시간 (s)</text></g>${traces.join("")}`;
     readings.innerHTML = channels.map(({ id }, index) => {
       const latest = shown.at(-1)?.values[id];
-      return `<span><i class="dot" style="--channel:${scopeColors[index]}"></i>CH${index + 1} · 오실로스코프 ${id} · ${Number.isFinite(latest) ? format(latest) + " V" : "미측정"}</span>`;
+      return `<span><i class="dot" style="--channel:${scopeColors[index]}"></i>CH${index + 1} · 오실로스코프 ${id} · ${formatVoltage(latest)}</span>`;
     }).join("");
     drawCursor();
   }

@@ -11,6 +11,7 @@ export function createSimulation(onSample, onFrame, onError) {
   let parts = [];
   let wires = [];
   let step = 1 / 1200;
+  let speed = 1;
   let time = 0;
   let budget = 0;
   let lastFrame = null;
@@ -29,13 +30,13 @@ export function createSimulation(onSample, onFrame, onError) {
   }
 
   function advance(now) {
-    budget += Math.min(0.05, (now - (lastFrame ?? now)) / 1000);
+    budget += Math.min(0.05, (now - (lastFrame ?? now)) / 1000) * speed;
     lastFrame = now;
     let reading;
     let count = 0;
     const deadline = performance.now() + 8;
     try {
-      while (budget >= step && count < 32 && (count === 0 || performance.now() < deadline)) {
+      while (budget >= step && count < 128 && (count === 0 || performance.now() < deadline)) {
         reading = measure(parts, wires, { time: time + step, step, storage });
         time += step;
         budget -= step;
@@ -70,5 +71,11 @@ export function createSimulation(onSample, onFrame, onError) {
     if (frameId === null) frameId = requestAnimationFrame(advance);
   }
 
-  return { configure, reset, isRunning: () => frameId !== null };
+  function setSpeed(multiplier) {
+    speed = multiplier;
+    budget = 0;
+    lastFrame = null;
+  }
+
+  return { configure, reset, setSpeed, isRunning: () => frameId !== null };
 }
