@@ -1,5 +1,6 @@
 import { solveLogic } from "./wasm-engine.js";
 import { createBoardCamera } from "./board-camera.js";
+import { chipPinY, chipPreview } from "./logic-chip-preview.js";
 
 import { boardSignals, chipFromBoard, flattenLogic, logicPins, logicTypes as types,
   maxLogicParts as maxParts, maxLogicWires as maxWires, validateChip } from "./logic-circuit.js";
@@ -57,7 +58,7 @@ function pinOffset(part, pin, output) {
   if (chips.has(part.type)) {
     const sides = logicPins(part.type, chips);
     const side = output ? sides.outputs : sides.inputs;
-    return [output ? 97 : -97, 10 + (side.findIndex((item) => item.pin === pin) - (side.length - 1) / 2) * 28];
+    return [output ? 97 : -97, chipPinY(side.findIndex((item) => item.pin === pin), side.length)];
   }
   if (pin === 2) return [58, 0];
   if (types[part.type].inputs === 1) return [-58, 0];
@@ -86,11 +87,14 @@ function partMarkup(part, values) {
   const { inputs, outputs } = logicPins(part.type, chips);
   const bodyWidth = chip ? 168 : 90;
   const bodyHeight = chip ? chipHeight(chip) : 56;
+  const preview = chip ? chipPreview(chip, bodyWidth, bodyHeight) : "";
   const value = signal(current?.[output ? 0 : 2]);
   return `<g class="logic-part${selected ? " selected" : ""}" data-logic-part="${part.id}" transform="translate(${part.x} ${part.y})">
     <g class="logic-body" data-logic-body="${part.id}" role="button" tabindex="0" aria-label="${label} 선택">
       <rect x="${-bodyWidth / 2}" y="${-bodyHeight / 2}" width="${bodyWidth}" height="${bodyHeight}" rx="11"/>
       <text class="logic-name" y="${chip ? 17 - bodyHeight / 2 : input || output ? -7 : 5}">${caption}</text>
+      ${preview}
+      ${chip ? `<text class="logic-chip-summary${preview ? " logic-chip-zoom-hint" : ""}" y="14">${preview ? "확대해 보기" : "내부 회로 생략"}</text>` : ""}
       ${output ? `<text class="logic-value" data-signal="${value}" y="16">${textValue(value)}</text>` : ""}
     </g>
     ${input ? `<g class="logic-toggle" data-logic-toggle="${part.id}" data-signal="${part.value}" role="button" tabindex="0" aria-label="${label} 입력 전환" aria-pressed="${Boolean(part.value)}"><rect x="-18" y="2" width="36" height="20" rx="6"/><text y="17">${part.value}</text></g>` : ""}
@@ -99,9 +103,10 @@ function partMarkup(part, values) {
       const [x, y] = pinOffset(part, pin, isOut);
       const active = pending && samePin(pending, [part.id, pin]);
       const pinValue = signal(current?.[pin]);
-      const chipLabel = name.length > 9 ? name.slice(0, 8) + "…" : name;
+      const labelLimit = preview ? 5 : 9;
+      const chipLabel = name.length > labelLimit ? name.slice(0, labelLimit - 1) + "…" : name;
       return `<path class="logic-stub" d="M${x} ${y}H${isOut ? bodyWidth / 2 : -bodyWidth / 2}"/>
-        ${chip ? `<text class="logic-chip-pin" x="${isOut ? 76 : -76}" y="${y + 4}" text-anchor="${isOut ? "end" : "start"}">${escape(chipLabel)}</text>` : ""}
+        ${chip ? `<text class="logic-chip-pin${preview ? " logic-chip-pin-preview" : ""}" x="${isOut ? 80 : -80}" y="${y + (preview ? -3 : 4)}" text-anchor="${isOut ? "end" : "start"}">${escape(chipLabel)}</text>` : ""}
         <circle cx="${x}" cy="${y}" r="6.5" class="logic-pin${active ? " pending" : ""}" data-logic-pin="${pin}" data-node="${part.id}" data-signal="${pinValue}" role="button" tabindex="0" aria-label="${label} ${escape(name)}, ${textValue(pinValue)}"/>`;
     }).join("")}
   </g>`;
