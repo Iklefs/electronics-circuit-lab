@@ -27,15 +27,12 @@
     </div>
     <div class="ribbon-examples">
       <label class="sr-only" for="example-type">예제 선택</label>
-      <select id="example-type">
-        <option value="lamp">램프 스위치</option>
-        <option value="rc">RC 충전·방전</option>
-        <option value="ac">교류 RC 필터</option>
-      </select>
+      <select id="example-type" aria-describedby="example-guide"></select>
       <button id="example" type="button">예제 회로 추가</button>
     </div>
   </div>
   <div id="palette" class="palette"></div>
+  <p id="example-guide" class="example-guide"><strong></strong> <span></span></p>
 </section>
 <section class="board" aria-label="회로 캔버스">
   <header class="board-bar"><div><p class="eyebrow">회로도</p><strong id="bench-count">부품 0개 · 배선 0개</strong></div>
@@ -141,13 +138,16 @@
   </section>
   <section class="component-ribbon" aria-label="논리회로 부품">
     <div class="ribbon-header"><h2>부품</h2><div class="ribbon-examples">
-      <button id="logic-example" type="button">반가산기 예제</button>
+      <label class="sr-only" for="logic-example-type">논리회로 예제 선택</label>
+      <select id="logic-example-type" aria-describedby="logic-example-guide"></select>
+      <button id="logic-example" type="button">예제 회로 추가</button>
       <button id="logic-chip-toggle" type="button" aria-controls="logic-chip-panel" aria-expanded="false">칩 / JSON</button>
     </div></div>
     <div id="logic-palette" class="palette">
       <div class="palette-group"></div>
       <div id="logic-chip-list" class="palette-group logic-chip-list" aria-label="저장한 칩" hidden></div>
     </div>
+    <p id="logic-example-guide" class="example-guide"><strong></strong> <span></span></p>
   </section>
   <section id="logic-chip-panel" class="card share-panel logic-chip-panel" hidden aria-label="논리 칩 만들기 및 가져오기">
     <p>입력 스위치와 출력 표시등이 칩의 단자가 됩니다. 작업대의 회로를 칩으로 만들거나 AI가 작성한 JSON을 붙여 넣으세요.</p>

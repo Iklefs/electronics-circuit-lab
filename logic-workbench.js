@@ -2,6 +2,7 @@ import { solveLogic } from "./wasm-engine.js";
 import { createBoardCamera } from "./board-camera.js";
 import { chipPinY, chipPreview } from "./logic-chip-preview.js";
 import { fullChipDiagram } from "./logic-chip-diagram.js";
+import { bindExamplePicker, buildExample, logicExamples } from "./circuit-examples.js";
 
 import { boardSignals, chipFromBoard, flattenLogic, logicPins, logicTypes as types,
   maxLogicParts as maxParts, maxLogicWires as maxWires, validateChip } from "./logic-circuit.js";
@@ -462,20 +463,15 @@ document.addEventListener("keydown", (event) => {
   }
 });
 
+const examplePicker = byId("logic-example-type");
+bindExamplePicker(examplePicker, byId("logic-example-guide"), logicExamples);
 byId("logic-example").addEventListener("click", () => {
   if (parts.length) return;
-  const a = add("input", 130, 160, "입력 A");
-  const b = add("input", 130, 310, "입력 B");
-  const xor = add("xor", 470, 160);
-  const and = add("and", 470, 310);
-  const sum = add("output", 800, 160, "합 S");
-  const carry = add("output", 800, 310, "올림 C");
-  for (const [from, to, pin, shift] of [
-    [a, xor, 0, 10], [b, xor, 1, 50], [a, and, 0, -45], [b, and, 1, -10],
-    [xor, sum, 0, 0], [and, carry, 0, 0],
-  ]) wires.push({ id: nextId++, a: [from.id, 2], b: [to.id, pin], shift });
+  const example = logicExamples[examplePicker.value];
+  buildExample(example, (type, x, y, options) => Object.assign(add(type, x, y), options),
+    (a, b, shift) => wires.push({ id: nextId++, a, b, shift }));
   selection = pending = placing = null;
-  update("입력 A와 B를 바꿔 합 S와 올림 C를 비교해 보세요.");
+  update(example.try);
 });
 
 const exampleChip = {
@@ -648,7 +644,8 @@ function restore() {
       if (typeof part?.type !== "string" || (!Object.hasOwn(types, part.type) && !sharedChips.has(part.type)) || !validId(part.id) ||
           ![0, 1].includes(part.value) || !Number.isFinite(part.x) || !Number.isFinite(part.y)) throw new Error();
       const item = { id: part.id, type: part.type, value: part.value };
-      if (["입력 A", "입력 B", "합 S", "올림 C"].includes(part.label)) item.label = part.label;
+      if (typeof part.label === "string" && part.label.length > 0 && part.label.length <= 24 &&
+          part.label.trim() === part.label && !/[\u0000-\u001f\u007f]/u.test(part.label)) item.label = part.label;
       nextParts.set(item.id, { ...item, x: part.x, y: part.y });
     }
     const used = new Set();

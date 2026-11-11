@@ -87,7 +87,9 @@ footer span{margin:0 .4rem}
 .palette-group button{display:flex;align-items:center;gap:.35rem;padding:.26rem .55rem .26rem .3rem;font-size:.77rem;line-height:1.25;white-space:nowrap;cursor:grab;touch-action:none;user-select:none}
 .palette-group button[aria-pressed="true"]{border-color:var(--blue);background:#e8efff}
 .palette-group .part-icon{display:grid;place-items:center;width:1.55rem;height:1.55rem;border-radius:5px;background:#edf2ff;color:#2a55b5;font-size:.95rem;font-weight:800}
-.ribbon-examples button,.ribbon-examples #example-type{font-size:.76rem;padding:.31rem .55rem}
+.ribbon-examples button,.ribbon-examples select{font-size:.76rem;padding:.31rem .55rem;max-width:100%}
+.example-guide{margin:.55rem 0 0;padding:.42rem .6rem;background:#edf3fc;border-radius:7px;color:#425c79;font-size:.76rem}
+.example-guide strong{color:#203c65}
 .sr-only{position:absolute;width:1px;height:1px;margin:-1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
 .bench-help{font-size:.79rem;color:var(--muted);margin:0}
 .board{overflow:hidden;min-width:0;border-radius:17px;background:#101e33;color:#e8f1fd;border:1px solid #273951}
@@ -153,7 +155,8 @@ button:disabled{cursor:default;opacity:.48}
 .part-editor input{width:100%;min-width:0;border:1px solid var(--line);border-radius:6px;padding:.3rem}
 #editor-label{display:block;margin-bottom:.2rem}
 
-#example-type,.scope-actions select{font:inherit;border:1px solid var(--line);border-radius:7px;padding:.38rem;color:inherit;background:white}
+.ribbon-examples select,.scope-actions select{font-family:inherit;border:1px solid var(--line);border-radius:7px;color:inherit;background:white}
+.scope-actions select{font:inherit;padding:.38rem}
 #editor-frequency label{display:block;margin-bottom:.2rem}
 .transient-scope{margin-top:1rem}
 .transient-scope .scope-heading,.scope-actions{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem}

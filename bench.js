@@ -1,4 +1,5 @@
 import { createBoardCamera } from "./board-camera.js";
+import { analogExamples, bindExamplePicker, buildExample } from "./circuit-examples.js";
 import { components, frequencyRange, groups, pinsFor } from "./components.js";
 import { pinCount, keyOf, measure } from "./circuit.js";
 import { createScope, scopeColors } from "./oscilloscope.js";
@@ -1165,9 +1166,25 @@ function addWaveExample(kind) {
   update();
 }
 
+const examplePicker = byId("example-type");
+bindExamplePicker(examplePicker, byId("example-guide"), analogExamples);
 byId("example").addEventListener("click", () => {
   if (parts.length) return;
-  const kind = byId("example-type").value;
+  const kind = examplePicker.value;
+  const example = analogExamples[kind];
+  if (example.parts) {
+    buildExample(example, (type, x, y, options) => Object.assign(addPart(type, x, y), options),
+      (a, b, points) => wires.push({ id: nextId++, a, b, ...(points ? { points } : {}) }));
+    recordEdit();
+    selection = pending = placing = null;
+    live = !example.scopeWindow;
+    if (example.scopeWindow) byId("scope-window").value = example.scopeWindow;
+    simulation.reset();
+    scope.clear();
+    update();
+    status.textContent = example.try;
+    return;
+  }
   if (kind !== "lamp") {
     addWaveExample(kind);
     return;
