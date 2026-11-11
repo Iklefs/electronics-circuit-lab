@@ -1,19 +1,8 @@
 import { solveLogic } from "./wasm-engine.js";
 import { createBoardCamera } from "./board-camera.js";
 
-const types = {
-  input: { name: "입력 스위치", icon: "▣", code: 0, inputs: 0, output: true },
-  low: { name: "상수 0", icon: "0", code: 1, inputs: 0, output: true },
-  high: { name: "상수 1", icon: "1", code: 2, inputs: 0, output: true },
-  output: { name: "출력 표시등", icon: "◉", code: 3, inputs: 1, output: false },
-  not: { name: "NOT", icon: "¬", code: 4, inputs: 1, output: true },
-  and: { name: "AND", icon: "∧", code: 5, inputs: 2, output: true },
-  nand: { name: "NAND", icon: "⊼", code: 6, inputs: 2, output: true },
-  or: { name: "OR", icon: "∨", code: 7, inputs: 2, output: true },
-  nor: { name: "NOR", icon: "⊽", code: 8, inputs: 2, output: true },
-  xor: { name: "XOR", icon: "⊕", code: 9, inputs: 2, output: true },
-  xnor: { name: "XNOR", icon: "⊙", code: 10, inputs: 2, output: true },
-};
+import { boardSignals, chipFromBoard, flattenLogic, logicPins, logicTypes as types,
+  maxLogicParts as maxParts, maxLogicWires as maxWires, validateChip } from "./logic-circuit.js";
 
 const byId = (id) => document.getElementById(id);
 const workspace = byId("logic-workbench");
@@ -27,7 +16,16 @@ const status = byId("logic-status");
 const share = byId("logic-share-panel");
 const link = byId("logic-link");
 const width = 960, height = 480;
-const maxParts = 48, maxWires = 96;
+const chips = new Map();
+const chipList = byId("logic-chip-list");
+const chipJson = byId("logic-chip-json");
+const chipName = byId("logic-chip-name");
+const chipStatus = byId("logic-chip-status");
+const viewChipJson = byId("logic-chip-view");
+const chipStorageKey = "circuit-lab.logic-chips.v1";
+const chipId = /^chip-[a-z0-9-]{1,50}$/;
+const maxJsonLength = 60000;
+const maxSharedLength = 150000;
 const instructions = "출력과 입력 단자를 차례로 누르면 연결됩니다. 스위치의 0 또는 1을 눌러 신호를 바꾸세요.";
 let parts = [];
 let wires = [];
@@ -49,7 +47,18 @@ palette.firstElementChild.innerHTML = Object.entries(types).map(([type, spec]) =
   `<button type="button" data-logic-type="${type}" aria-pressed="false"><span class="part-icon" aria-hidden="true">${spec.icon}</span>${spec.name}</button>`
 ).join("");
 
-function pinOffset(part, pin) {
+const escape = (text) => String(text).replace(/[&<>"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[char]);
+const nameOf = (type) => chips.get(type)?.name ?? types[type].name;
+const isOutput = ([id, pin]) => logicPins(parts.find((part) => part.id === id).type, chips).outputs.some((port) => port.pin === pin);
+const chipHeight = ({ inputs, outputs }) => Math.max(58, 30 + Math.max(inputs.length, outputs.length) * 28);
+const selectedChip = () => selection?.kind === "part" && chips.get(parts.find(({ id }) => id === selection.id)?.type);
+
+function pinOffset(part, pin, output) {
+  if (chips.has(part.type)) {
+    const sides = logicPins(part.type, chips);
+    const side = output ? sides.outputs : sides.inputs;
+    return [output ? 97 : -97, 10 + (side.findIndex((item) => item.pin === pin) - (side.length - 1) / 2) * 28];
+  }
   if (pin === 2) return [58, 0];
   if (types[part.type].inputs === 1) return [-58, 0];
   return [-58, pin === 0 ? -14 : 14];
@@ -57,7 +66,7 @@ function pinOffset(part, pin) {
 
 function pinPosition([id, pin]) {
   const part = parts.find((item) => item.id === id);
-  const [x, y] = pinOffset(part, pin);
+  const [x, y] = pinOffset(part, pin, isOutput([id, pin]));
   return [part.x + x, part.y + y];
 }
 
@@ -67,28 +76,33 @@ function path(a, b, shift = 0) {
 }
 
 function partMarkup(part, values) {
-  const spec = types[part.type];
+  const chip = chips.get(part.type);
   const current = values?.get(part.id);
   const selected = selection?.kind === "part" && selection.id === part.id;
   const input = part.type === "input";
   const output = part.type === "output";
-  const label = part.label ?? spec.name;
+  const label = escape(part.label ?? nameOf(part.type));
+  const caption = chip && chip.name.length > 19 ? escape(chip.name.slice(0, 18) + "…") : label;
+  const { inputs, outputs } = logicPins(part.type, chips);
+  const bodyWidth = chip ? 168 : 90;
+  const bodyHeight = chip ? chipHeight(chip) : 56;
   const value = signal(current?.[output ? 0 : 2]);
-  const pins = [...Array.from({ length: spec.inputs }, (_, pin) => pin), ...(spec.output ? [2] : [])];
   return `<g class="logic-part${selected ? " selected" : ""}" data-logic-part="${part.id}" transform="translate(${part.x} ${part.y})">
     <g class="logic-body" data-logic-body="${part.id}" role="button" tabindex="0" aria-label="${label} 선택">
-      <rect x="-45" y="-28" width="90" height="56" rx="11"/>
-      <text class="logic-name" y="${input || output ? -7 : 5}">${label}</text>
+      <rect x="${-bodyWidth / 2}" y="${-bodyHeight / 2}" width="${bodyWidth}" height="${bodyHeight}" rx="11"/>
+      <text class="logic-name" y="${chip ? 17 - bodyHeight / 2 : input || output ? -7 : 5}">${caption}</text>
       ${output ? `<text class="logic-value" data-signal="${value}" y="16">${textValue(value)}</text>` : ""}
     </g>
     ${input ? `<g class="logic-toggle" data-logic-toggle="${part.id}" data-signal="${part.value}" role="button" tabindex="0" aria-label="${label} 입력 전환" aria-pressed="${Boolean(part.value)}"><rect x="-18" y="2" width="36" height="20" rx="6"/><text y="17">${part.value}</text></g>` : ""}
-    ${pins.map((pin) => {
-      const [x, y] = pinOffset(part, pin);
+    ${[...inputs, ...outputs].map(({ pin, name }) => {
+      const isOut = outputs.some((port) => port.pin === pin);
+      const [x, y] = pinOffset(part, pin, isOut);
       const active = pending && samePin(pending, [part.id, pin]);
-      const name = pin === 2 ? "출력" : "입력 " + (pin === 0 ? "A" : "B");
       const pinValue = signal(current?.[pin]);
-      return `<path class="logic-stub" d="M${x} ${y}H${pin === 2 ? 45 : -45}"/>
-        <circle cx="${x}" cy="${y}" r="6.5" class="logic-pin${active ? " pending" : ""}" data-logic-pin="${pin}" data-node="${part.id}" data-signal="${pinValue}" role="button" tabindex="0" aria-label="${label} ${name}, ${textValue(pinValue)}"/>`;
+      const chipLabel = name.length > 9 ? name.slice(0, 8) + "…" : name;
+      return `<path class="logic-stub" d="M${x} ${y}H${isOut ? bodyWidth / 2 : -bodyWidth / 2}"/>
+        ${chip ? `<text class="logic-chip-pin" x="${isOut ? 76 : -76}" y="${y + 4}" text-anchor="${isOut ? "end" : "start"}">${escape(chipLabel)}</text>` : ""}
+        <circle cx="${x}" cy="${y}" r="6.5" class="logic-pin${active ? " pending" : ""}" data-logic-pin="${pin}" data-node="${part.id}" data-signal="${pinValue}" role="button" tabindex="0" aria-label="${label} ${escape(name)}, ${textValue(pinValue)}"/>`;
     }).join("")}
   </g>`;
 }
@@ -99,7 +113,7 @@ function draw(values) {
     const d = path(pinPosition(a), pinPosition(b), shift);
     const selected = selection?.kind === "wire" && selection.id === id;
     return `<g class="wire logic-wire${selected ? " selected" : ""}" data-logic-wire="${id}" role="button" tabindex="0" aria-label="배선 ${id} 선택">
-      <path class="logic-signal" data-signal="${signal(values?.get(a[0])?.[2])}" d="${d}"/><path class="wire-hit" d="${d}"/></g>`;
+      <path class="logic-signal" data-signal="${signal(values?.get(a[0])?.[a[1]])}" d="${d}"/><path class="wire-hit" d="${d}"/></g>`;
   }).join("");
   draft.setAttribute("hidden", "");
   byId("logic-count").textContent = `부품 ${parts.length}개 · 배선 ${wires.length}개`;
@@ -107,6 +121,7 @@ function draw(values) {
   byId("logic-clear").disabled = parts.length === 0;
   byId("logic-example").disabled = parts.length > 0;
   byId("logic-delete").disabled = !selection;
+  viewChipJson.disabled = !selectedChip();
   byId("logic-cancel").hidden = !placing && !pending;
   board.classList.toggle("placing", Boolean(placing || gesture?.type));
   for (const button of palette.querySelectorAll("button")) {
@@ -117,7 +132,7 @@ function draw(values) {
 function update(message = instructions, changed = true) {
   if (changed) share.hidden = true;
   try {
-    draw(solveLogic(parts, wires, (type) => types[type].code));
+    draw(boardSignals(parts, wires, chips, solveLogic));
     status.textContent = message;
   } catch (error) {
     draw(null);
@@ -126,8 +141,11 @@ function update(message = instructions, changed = true) {
 }
 
 function move(part, x, y) {
-  part.x = Math.max(65, Math.min(width - 65, Math.round(x / 10) * 10));
-  part.y = Math.max(42, Math.min(height - 42, Math.round(y / 10) * 10));
+  const chip = chips.get(part.type);
+  const horizontal = chip ? 110 : 65;
+  const vertical = chip ? chipHeight(chip) / 2 + 10 : 42;
+  part.x = Math.max(horizontal, Math.min(width - horizontal, Math.round(x / 10) * 10));
+  part.y = Math.max(vertical, Math.min(height - vertical, Math.round(y / 10) * 10));
 }
 
 function add(type, x, y, label) {
@@ -142,9 +160,14 @@ function place(type, x, y) {
     update(`부품은 최대 ${maxParts}개까지 배치할 수 있습니다.`, false);
     return;
   }
+  try {
+    flattenLogic([...parts, { id: nextId, type, value: 0 }], wires, chips);
+  } catch (error) {
+    return update(error.message, false);
+  }
   selection = { kind: "part", id: add(type, x, y).id };
   pending = placing = null;
-  update(`${types[type].name} 배치 완료. 단자를 눌러 연결하세요.`);
+  update(`${nameOf(type)} 배치 완료. 단자를 눌러 연결하세요.`);
 }
 
 function connect(end) {
@@ -157,11 +180,18 @@ function connect(end) {
   const first = pending;
   pending = null;
   if (samePin(first, end)) return update("배선 연결을 취소했습니다.", false);
-  if ((first[1] === 2) === (end[1] === 2)) return update("출력과 입력 단자를 연결하세요.", false);
-  const [a, b] = first[1] === 2 ? [first, end] : [end, first];
+  const firstOut = isOutput(first);
+  if (firstOut === isOutput(end)) return update("출력과 입력 단자를 연결하세요.", false);
+  const [a, b] = firstOut ? [first, end] : [end, first];
   if (wires.some((wire) => samePin(wire.b, b))) return update("이 입력에는 이미 배선이 있습니다. 기존 배선을 지운 뒤 연결하세요.", false);
   if (wires.length >= maxWires) return update(`배선은 최대 ${maxWires}개까지 추가할 수 있습니다.`, false);
-  const wire = { id: nextId++, a, b };
+  const wire = { id: nextId, a, b };
+  try {
+    flattenLogic(parts, [...wires, wire], chips);
+  } catch (error) {
+    return update(error.message, false);
+  }
+  nextId++;
   wires.push(wire);
   selection = { kind: "wire", id: wire.id };
   update("배선을 연결했습니다.");
@@ -288,7 +318,7 @@ board.addEventListener("pointermove", (event) => {
   if (!pending || gesture) return;
   const { x, y } = point(event);
   const start = pinPosition(pending);
-  draft.setAttribute("d", pending[1] === 2 ? path(start, [x, y]) : path([x, y], start));
+  draft.setAttribute("d", isOutput(pending) ? path(start, [x, y]) : path([x, y], start));
   draft.removeAttribute("hidden");
 });
 board.addEventListener("pointerleave", () => draft.setAttribute("hidden", ""));
@@ -322,7 +352,7 @@ byId("logic-clear").addEventListener("click", () => {
   update("작업대를 비웠습니다.");
 });
 document.addEventListener("keydown", (event) => {
-  if (workspace.hidden || event.target.matches("input")) return;
+  if (workspace.hidden || event.target.matches("input, textarea, select")) return;
   if (event.key === "Escape") {
     if (gesture) finish({ pointerId: gesture.pointer }, true);
     pending = placing = null;
@@ -358,9 +388,132 @@ byId("logic-example").addEventListener("click", () => {
   update("입력 A와 B를 바꿔 합 S와 올림 C를 비교해 보세요.");
 });
 
+const exampleChip = {
+  v: 1,
+  name: "반가산기",
+  inputs: ["A", "B"],
+  outputs: [{ name: "합", from: "sum" }, { name: "올림", from: "carry" }],
+  gates: [
+    { id: "sum", type: "xor", inputs: ["A", "B"] },
+    { id: "carry", type: "and", inputs: ["A", "B"] },
+  ],
+};
+
+function renderChipList() {
+  chipList.replaceChildren(...[...chips].slice(-32).reverse().map(([id, chip]) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.dataset.logicType = id;
+    button.setAttribute("aria-pressed", String(placing === id));
+    button.textContent = chip.name;
+    button.title = `칩 · 입력 ${chip.inputs.length}개 · 출력 ${chip.outputs.length}개`;
+    return button;
+  }));
+  chipList.hidden = !chipList.childElementCount;
+}
+
+function saveChipLibrary() {
+  try {
+    localStorage.setItem(chipStorageKey, JSON.stringify([...chips].slice(-32)));
+  } catch {
+    // Imported definitions still remain available in this tab and in shared links.
+  }
+}
+
+function loadChipLibrary() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(chipStorageKey));
+    if (!Array.isArray(saved)) return;
+    for (const [id, chip] of saved.slice(-32)) {
+      if (typeof id === "string" && chipId.test(id)) chips.set(id, validateChip(chip));
+    }
+  } catch {
+    // Storage may be disabled or an older saved entry may be invalid.
+  }
+}
+
+function registerChip(chip, preferredId) {
+  const definition = JSON.stringify(chip);
+  const existing = [...chips].find(([, saved]) => JSON.stringify(saved) === definition);
+  const id = existing?.[0] ?? (preferredId && !chips.has(preferredId) ? preferredId : "chip-" + crypto.randomUUID());
+  chips.delete(id);
+  chips.set(id, chip);
+  return id;
+}
+
+function showChip(chip) {
+  registerChip(chip);
+  saveChipLibrary();
+  renderChipList();
+  chipJson.value = JSON.stringify(chip, null, 2);
+  chipStatus.textContent = `${chip.name} 칩을 저장했습니다. 부품 목록에서 선택해 배치하세요.`;
+}
+
+const chipPanel = byId("logic-chip-panel");
+const chipToggle = byId("logic-chip-toggle");
+chipToggle.addEventListener("click", () => {
+  chipPanel.hidden = !chipPanel.hidden;
+  chipToggle.setAttribute("aria-expanded", String(!chipPanel.hidden));
+  if (!chipPanel.hidden) chipName.focus();
+});
+byId("logic-chip-create").addEventListener("click", () => {
+  try {
+    showChip(chipFromBoard(chipName.value.trim(), parts, wires, chips));
+  } catch (error) {
+    chipStatus.textContent = error.message;
+  }
+});
+byId("logic-chip-import").addEventListener("click", () => {
+  if (chipJson.value.length > maxJsonLength) {
+    chipStatus.textContent = "칩 JSON이 너무 깁니다.";
+    return;
+  }
+  let data;
+  try {
+    data = JSON.parse(chipJson.value);
+  } catch {
+    chipStatus.textContent = "JSON 형식을 확인하세요.";
+    return;
+  }
+  try {
+    showChip(validateChip(data));
+  } catch (error) {
+    chipStatus.textContent = error.message;
+  }
+});
+byId("logic-chip-example").addEventListener("click", () => {
+  chipJson.value = JSON.stringify(exampleChip, null, 2);
+  chipStatus.textContent = "";
+});
+viewChipJson.addEventListener("click", () => {
+  const chip = selectedChip();
+  if (!chip) return;
+  chipJson.value = JSON.stringify(chip, null, 2);
+  chipStatus.textContent = `${chip.name} 칩의 JSON을 불러왔습니다.`;
+});
+byId("logic-chip-copy").addEventListener("click", async () => {
+  if (!chipJson.value.trim()) return;
+  try {
+    await navigator.clipboard.writeText(chipJson.value);
+    chipStatus.textContent = "칩 JSON을 복사했습니다.";
+  } catch {
+    chipJson.focus();
+    chipJson.select();
+    chipStatus.textContent = "선택된 JSON을 복사하세요.";
+  }
+});
+
 byId("logic-share").addEventListener("click", () => {
   const url = new URL(location.href);
-  url.hash = "logic=" + encodeURIComponent(JSON.stringify({ v: 1, parts, wires }));
+  const usedChips = [...new Set(parts.map(({ type }) => type))]
+    .filter((type) => chips.has(type)).map((type) => [type, chips.get(type)]);
+  url.hash = "logic=" + encodeURIComponent(JSON.stringify({
+    v: 1, parts, wires, ...(usedChips.length ? { chips: usedChips } : {}),
+  }));
+  if (url.hash.length > maxSharedLength) {
+    status.textContent = "공유 링크가 너무 깁니다. 사용한 칩이나 부품을 줄여 주세요.";
+    return;
+  }
   link.value = url.href;
   share.hidden = false;
   link.focus();
@@ -382,10 +535,18 @@ function restore() {
   if (!hash.startsWith("#logic=") || hash === loadedHash) return;
   loadedHash = hash;
   try {
-    if (hash.length > 36000) throw new Error();
+    if (hash.length > maxSharedLength) throw new Error();
     const saved = JSON.parse(decodeURIComponent(hash.slice(7)));
     if (saved.v !== 1 || !Array.isArray(saved.parts) || !Array.isArray(saved.wires) ||
       saved.parts.length > maxParts || saved.wires.length > maxWires) throw new Error();
+    const sharedChips = new Map();
+    if (saved.chips !== undefined) {
+      if (!Array.isArray(saved.chips) || saved.chips.length > maxParts) throw new Error();
+      for (const [id, chip] of saved.chips) {
+        if (typeof id !== "string" || !chipId.test(id) || sharedChips.has(id)) throw new Error();
+        sharedChips.set(id, validateChip(chip));
+      }
+    }
     const ids = new Set();
     const validId = (id) => {
       if (!Number.isInteger(id) || id < 1 || id > 1e9 || ids.has(id)) return false;
@@ -394,18 +555,17 @@ function restore() {
     };
     const nextParts = new Map();
     for (const part of saved.parts) {
-      if (!part || !Object.hasOwn(types, part.type) || !validId(part.id) ||
+      if (typeof part?.type !== "string" || (!Object.hasOwn(types, part.type) && !sharedChips.has(part.type)) || !validId(part.id) ||
           ![0, 1].includes(part.value) || !Number.isFinite(part.x) || !Number.isFinite(part.y)) throw new Error();
       const item = { id: part.id, type: part.type, value: part.value };
       if (["입력 A", "입력 B", "합 S", "올림 C"].includes(part.label)) item.label = part.label;
-      move(item, part.x, part.y);
-      nextParts.set(item.id, item);
+      nextParts.set(item.id, { ...item, x: part.x, y: part.y });
     }
     const used = new Set();
     const validPin = (pin, output) => {
       if (!Array.isArray(pin) || pin.length !== 2 || !nextParts.has(pin[0])) return false;
-      const spec = types[nextParts.get(pin[0]).type];
-      return output ? pin[1] === 2 && spec.output : Number.isInteger(pin[1]) && pin[1] >= 0 && pin[1] < spec.inputs;
+      const pins = logicPins(nextParts.get(pin[0]).type, sharedChips);
+      return (output ? pins.outputs : pins.inputs).some(({ pin: index }) => index === pin[1]);
     };
     const nextWires = saved.wires.map((wire) => {
       if (!wire || !validId(wire.id) || !validPin(wire.a, true) || !validPin(wire.b, false) || used.has(wire.b.join(":"))) throw new Error();
@@ -413,8 +573,24 @@ function restore() {
       const shift = Number.isFinite(wire.shift) && Math.abs(wire.shift) <= 80 ? wire.shift : 0;
       return { id: wire.id, a: wire.a, b: wire.b, shift };
     });
-    parts = [...nextParts.values()];
+    const next = [...nextParts.values()];
+    flattenLogic(next, nextWires, sharedChips);
+    const replacements = new Map();
+    for (const { type } of next) {
+      if (sharedChips.has(type) && !replacements.has(type)) {
+        replacements.set(type, registerChip(sharedChips.get(type), type));
+      }
+    }
+    for (const part of next) {
+      part.type = replacements.get(part.type) ?? part.type;
+      move(part, part.x, part.y);
+    }
+    parts = next;
     wires = nextWires;
+    if (replacements.size) {
+      renderChipList();
+      saveChipLibrary();
+    }
     nextId = Math.max(0, ...ids) + 1;
     selection = pending = placing = null;
     update("공유 링크의 논리회로를 불러왔습니다.");
@@ -424,5 +600,7 @@ function restore() {
 }
 
 window.addEventListener("hashchange", restore);
+loadChipLibrary();
+renderChipList();
 update();
 restore();

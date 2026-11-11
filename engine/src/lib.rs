@@ -4,8 +4,8 @@ mod logic;
 use analog::{Error, Part, PartKind, TimeStep, PIN_STRIDE};
 use logic::Gate;
 
-const MAX_PARTS: usize = 64;
-const MAX_WIRES: usize = 128;
+const MAX_PARTS: usize = 256;
+const MAX_WIRES: usize = 512;
 const PART_STRIDE: usize = 4;
 const WIRE_INPUT: usize = MAX_PARTS * PART_STRIDE;
 const VOLT_OUTPUT: usize = WIRE_INPUT + MAX_WIRES * 2;

@@ -13,20 +13,23 @@ pub enum Gate {
     Nor,
     Xor,
     Xnor,
+    Buffer,
 }
 
 impl Gate {
     pub fn from_code(code: usize) -> Option<Self> {
         use Gate::*;
-        [Input, Low, High, Output, Not, And, Nand, Or, Nor, Xor, Xnor]
-            .get(code)
-            .copied()
+        [
+            Input, Low, High, Output, Not, And, Nand, Or, Nor, Xor, Xnor, Buffer,
+        ]
+        .get(code)
+        .copied()
     }
 
     pub fn inputs(self) -> usize {
         match self {
             Self::Input | Self::Low | Self::High => 0,
-            Self::Output | Self::Not => 1,
+            Self::Output | Self::Not | Self::Buffer => 1,
             _ => 2,
         }
     }
@@ -75,6 +78,7 @@ impl Gate {
             Nor => invert(or()),
             Xor => xor(),
             Xnor => invert(xor()),
+            Buffer => a,
         }
     }
 }

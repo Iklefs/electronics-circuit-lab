@@ -13,8 +13,8 @@ const wasm = await (async () => {
 // Shared ABI with engine/src/lib.rs. Each part has three pin slots and four input fields.
 const pinStride = 3;
 const partStride = 4;
-const maxParts = 64;
-const maxWires = 128;
+const maxParts = 256;
+const maxWires = 512;
 const wireInput = maxParts * partStride;
 const voltOutput = wireInput + maxWires * 2;
 const currentOutput = voltOutput + maxParts * pinStride;

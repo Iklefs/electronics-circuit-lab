@@ -81,7 +81,7 @@
         <input id="part-frequency" type="number" step="any" required disabled>
       </div>
       <button id="scope-jump" type="button" hidden>오실로스코프 열기</button>
-      <button id="rotate-part" type="button">↻ 90° 회전</button>
+      <button id="rotate-part" type="button">↻ 15° 회전</button>
       <button id="editor-delete" type="button">부품 삭제</button>
     </form>
     <div id="board-reading" class="board-reading" role="tooltip" hidden></div>
@@ -140,8 +140,30 @@
     <div class="link-row"><input id="logic-link" readonly><button id="logic-copy" type="button">복사</button></div>
   </section>
   <section class="component-ribbon" aria-label="논리회로 부품">
-    <div class="ribbon-header"><h2>부품</h2><button id="logic-example" type="button">반가산기 예제</button></div>
-    <div id="logic-palette" class="palette"><div class="palette-group"></div></div>
+    <div class="ribbon-header"><h2>부품</h2><div class="ribbon-examples">
+      <button id="logic-example" type="button">반가산기 예제</button>
+      <button id="logic-chip-toggle" type="button" aria-controls="logic-chip-panel" aria-expanded="false">칩 / JSON</button>
+    </div></div>
+    <div id="logic-palette" class="palette">
+      <div class="palette-group"></div>
+      <div id="logic-chip-list" class="palette-group logic-chip-list" aria-label="저장한 칩" hidden></div>
+    </div>
+  </section>
+  <section id="logic-chip-panel" class="card share-panel logic-chip-panel" hidden aria-label="논리 칩 만들기 및 가져오기">
+    <p>입력 스위치와 출력 표시등이 칩의 단자가 됩니다. 작업대의 회로를 칩으로 만들거나 AI가 작성한 JSON을 붙여 넣으세요.</p>
+    <div class="logic-chip-actions">
+      <label for="logic-chip-name">칩 이름</label><input id="logic-chip-name" type="text" maxlength="36" value="내 논리 칩">
+      <button id="logic-chip-create" type="button">작업대를 칩으로 저장</button>
+    </div>
+    <label for="logic-chip-json">칩 JSON</label>
+    <textarea id="logic-chip-json" rows="8" spellcheck="false" autocapitalize="off"></textarea>
+    <div class="logic-chip-actions">
+      <button id="logic-chip-import" type="button" class="primary">JSON으로 칩 추가</button>
+      <button id="logic-chip-example" type="button">JSON 예시</button>
+      <button id="logic-chip-view" type="button" disabled>선택한 칩 JSON 보기</button>
+      <button id="logic-chip-copy" type="button">JSON 복사</button>
+    </div>
+    <p id="logic-chip-status" class="status" role="status"></p>
   </section>
   <section class="board" aria-label="논리회로 캔버스">
     <header class="board-bar">

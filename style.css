@@ -232,6 +232,14 @@ body.workbench-expanded{overflow:hidden}
 .logic-body:focus-visible rect,.logic-part.selected .logic-body rect{stroke:#ffe298;stroke-width:2.4}
 .logic-name,.logic-value,.logic-toggle text{fill:#edf4ff;text-anchor:middle;font-size:14px;font-weight:750;pointer-events:none}
 .logic-value{fill:var(--signal);font-size:16px}
+.logic-chip-pin{fill:#d5e5ff;font-size:11px;pointer-events:none}
+.logic-chip-list{margin-top:.5rem}
+.logic-chip-list button{max-width:100%;white-space:normal;overflow-wrap:anywhere}
+.logic-chip-panel{display:grid;gap:.55rem}
+.logic-chip-panel p{margin:0}
+.logic-chip-panel textarea{width:100%;resize:vertical;padding:.55rem;border:1px solid var(--line);border-radius:8px;font:1rem monospace}
+.logic-chip-actions{display:flex;align-items:center;gap:.4rem;flex-wrap:wrap}
+.logic-chip-actions input{max-width:100%;padding:.45rem;border:1px solid var(--line);border-radius:8px}
 .logic-stub{fill:none;stroke:#829ac0;stroke-width:2.2;pointer-events:none}
 .logic-pin{fill:#14243b;stroke:var(--signal);stroke-width:2.4;cursor:crosshair}
 .logic-pin.pending,.logic-pin:hover,.logic-pin:focus-visible{fill:#ffe298;stroke:#fff4ca}
