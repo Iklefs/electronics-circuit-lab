@@ -5,7 +5,7 @@ const maxChipGates = 120;
 const maxExpandedParts = 256;
 const maxExpandedWires = 512;
 
-// The positions in this list match Gate::from_code in the Rust engine.
+// Primitive gate codes match Gate::from_code in the Rust engine.
 export const logicTypes = {
   input: { name: "입력 스위치", icon: "▣", code: 0, inputs: 0, output: true },
   low: { name: "상수 0", icon: "0", code: 1, inputs: 0, output: true },
@@ -18,6 +18,7 @@ export const logicTypes = {
   nor: { name: "NOR", icon: "⊽", code: 8, inputs: 2, output: true },
   xor: { name: "XOR", icon: "⊕", code: 9, inputs: 2, output: true },
   xnor: { name: "XNOR", icon: "⊙", code: 10, inputs: 2, output: true },
+  pulse: { name: "펄스 발생기", icon: "⊓", inputs: 0, output: true },
 };
 const buffer = { code: 11, inputs: 1 };
 const gateSpec = (type) => type === "buf" ? buffer : Object.hasOwn(logicTypes, type) && logicTypes[type];
@@ -44,7 +45,7 @@ export function validateChip(chip) {
   }
   const gates = chip.gates.map((gate) => {
     const spec = typeof gate?.type === "string" && gateSpec(gate.type);
-    if (!spec || ["input", "output"].includes(gate.type) ||
+    if (!spec || ["input", "output", "pulse"].includes(gate.type) ||
         typeof gate.id !== "string" || !/^[a-zA-Z0-9_-]{1,24}$/.test(gate.id) || nets.has(gate.id) ||
         !Array.isArray(gate.inputs) || gate.inputs.length !== spec.inputs) {
       throw new Error("게이트의 ID, 종류, 입력 개수를 확인하세요.");
@@ -96,7 +97,7 @@ export function flattenLogic(parts, wires, chips) {
   for (const part of parts) {
     const chip = chips.get(part.type);
     if (!chip) {
-      const node = add(part.type, part.value);
+      const node = add(part.type === "pulse" ? "input" : part.type, part.value);
       const { inputs, outputs } = logicPins(part.type, chips);
       for (const { pin } of [...inputs, ...outputs]) ports.set(pinKey([part.id, pin]), [node, pin]);
       continue;
@@ -144,14 +145,14 @@ export function boardSignals(parts, wires, chips, solve) {
 }
 
 export function chipFromBoard(name, parts, wires, chips) {
-  const inputParts = parts.filter(({ type }) => type === "input");
+  const inputParts = parts.filter(({ type }) => type === "input" || type === "pulse");
   const outputParts = parts.filter(({ type }) => type === "output");
   if (!outputParts.length) throw new Error("칩의 출력으로 사용할 출력 표시등을 추가하세요.");
   const { nodes, links, ports } = flattenLogic(parts, wires, chips);
   const incoming = new Map(links.map(({ a, b }) => [pinKey(b), a[0]]));
   const names = new Map(nodes.map(({ id }) => [id, "g" + id]));
   const inputNames = inputParts.map((part, index) => {
-    const name = part.label ?? "I" + (index + 1);
+    const name = part.label ?? (part.type === "pulse" ? "CLK" : "I") + (index + 1);
     names.set(ports.get(pinKey([part.id, 2]))[0], name);
     return name;
   });

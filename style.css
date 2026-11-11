@@ -226,6 +226,9 @@ body.workbench-expanded{overflow:hidden}
 .logic-legend{color:#c9dafa;font-size:.74rem}
 .logic-legend span{display:flex;gap:.25rem;align-items:center;white-space:nowrap}
 .logic-legend i{width:8px;height:8px;border-radius:100%;background:var(--signal,#a2aec5)}
+.logic-pulse-settings{display:flex;flex-wrap:wrap;align-items:center;gap:.35rem .5rem;width:100%;padding:.5rem;border:1px solid #415671;border-radius:8px;font-size:.78rem}
+.logic-pulse-settings input{width:4.5rem;padding:.3rem;border:1px solid #597492;border-radius:6px;background:#213a57;color:#eff6ff}
+.logic-pulse-settings button{padding:.35rem .55rem;font-size:.75rem}
 #logic-workbench [data-signal="1"]{--signal:#73ecc5}
 #logic-workbench [data-signal="0"]{--signal:#8aaff8}
 #logic-workbench [data-signal="-1"]{--signal:#a2aec5}
@@ -307,6 +310,8 @@ body.workbench-expanded{overflow:hidden}
 
 @media(pointer:coarse){
   .chip-diagram-actions button{min-height:44px}
+  .logic-pulse-settings input,.logic-pulse-settings button{min-height:44px}
+  .logic-pulse-settings input{font-size:16px}
   #board,#logic-board{touch-action:none}
   button,.lab-nav a{touch-action:manipulation}
   #editor-reading{display:block}

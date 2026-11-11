@@ -197,6 +197,22 @@ export const logicExamples = {
       ["top", 2, "or", 0], ["bottom", 2, "or", 1], ["or", 2, "y", 0],
     ],
   },
+  pulse: {
+    name: "펄스·AND · 신호 통과",
+    role: "펄스 발생기는 0과 1을 반복합니다. AND는 허용 입력이 1일 때 그 펄스를 통과시킵니다.",
+    try: "허용 스위치를 0으로 바꾸면 직결 표시등은 계속 깜빡이고 AND 출력은 0이 됩니다.",
+    parts: [
+      ["clock", "pulse", 130, 155],
+      ["enable", "input", 130, 325, { label: "허용", value: 1 }],
+      ["and", "and", 465, 295],
+      ["direct", "output", 790, 135, { label: "직결" }],
+      ["out", "output", 790, 295, { label: "AND 출력" }],
+    ],
+    wires: [
+      ["clock", 2, "direct", 0, -30], ["clock", 2, "and", 0, -35],
+      ["enable", 2, "and", 1, 25], ["and", 2, "out", 0],
+    ],
+  },
 };
 
 export function bindExamplePicker(select, guide, examples) {

@@ -31,6 +31,11 @@ const diagram = byId("chip-diagram");
 const diagramScroll = byId("chip-diagram-scroll");
 const zoomDiagramOut = byId("chip-diagram-out");
 const zoomDiagramIn = byId("chip-diagram-in");
+const pulseSettings = byId("logic-pulse-settings");
+const pulseFrequency = byId("logic-pulse-frequency");
+const pulseDuty = byId("logic-pulse-duty");
+const pulseDefaults = { frequency: 1, duty: 50, running: true, value: 1 };
+const pulseStarts = new Map();
 const chipStorageKey = "circuit-lab.logic-chips.v1";
 const chipId = /^chip-[a-z0-9-]{1,50}$/;
 const maxJsonLength = 60000;
@@ -47,6 +52,8 @@ let loadedHash;
 let diagramLayout;
 let diagramScale = 1;
 let dialogTrigger;
+let pulseFrame = null;
+let editedPulseId = null;
 const { view: camera, set: setCamera, point } = createBoardCamera(board, {
   width, height, controls: byId("logic-zoom"), busy: () => Boolean(gesture),
 });
@@ -64,6 +71,18 @@ const nameOf = (type) => chips.get(type)?.name ?? types[type].name;
 const isOutput = ([id, pin]) => logicPins(parts.find((part) => part.id === id).type, chips).outputs.some((port) => port.pin === pin);
 const chipHeight = ({ inputs, outputs }) => Math.max(58, 30 + Math.max(inputs.length, outputs.length) * 28);
 const selectedChip = () => selection?.kind === "part" && chips.get(parts.find(({ id }) => id === selection.id)?.type);
+const selectedPulse = () => selection?.kind === "part" &&
+  parts.find((part) => part.id === selection.id && part.type === "pulse");
+
+function syncPulseSettings() {
+  const pulse = selectedPulse();
+  pulseSettings.hidden = !pulse;
+  if (pulse && editedPulseId !== pulse.id) {
+    pulseFrequency.value = pulse.frequency;
+    pulseDuty.value = pulse.duty;
+  }
+  editedPulseId = pulse?.id;
+}
 
 function pinOffset(part, pin, output) {
   if (chips.has(part.type)) {
@@ -92,6 +111,7 @@ function partMarkup(part, values) {
   const current = values?.get(part.id);
   const selected = selection?.kind === "part" && selection.id === part.id;
   const input = part.type === "input";
+  const pulse = part.type === "pulse";
   const output = part.type === "output";
   const label = escape(part.label ?? nameOf(part.type));
   const caption = chip && chip.name.length > 19 ? escape(chip.name.slice(0, 18) + "…") : label;
@@ -103,12 +123,16 @@ function partMarkup(part, values) {
   return `<g class="logic-part${selected ? " selected" : ""}" data-logic-part="${part.id}" transform="translate(${part.x} ${part.y})">
     <g class="logic-body" data-logic-body="${part.id}" role="button" tabindex="0" aria-label="${label} 선택">
       <rect x="${-bodyWidth / 2}" y="${-bodyHeight / 2}" width="${bodyWidth}" height="${bodyHeight}" rx="11"/>
-      <text class="logic-name" y="${chip ? 17 - bodyHeight / 2 : input || output ? -7 : 5}">${caption}</text>
+      <text class="logic-name" y="${chip ? 17 - bodyHeight / 2 : input || output || pulse ? -7 : 5}">${caption}</text>
       ${preview}
       ${chip ? `<text class="logic-chip-summary${preview ? " logic-chip-zoom-hint" : ""}" y="14">${preview ? "내부 회로 보기" : "내부 회로 생략"}</text>` : ""}
       ${output ? `<text class="logic-value" data-signal="${value}" y="16">${textValue(value)}</text>` : ""}
     </g>
     ${input ? `<g class="logic-toggle" data-logic-toggle="${part.id}" data-signal="${part.value}" role="button" tabindex="0" aria-label="${label} 입력 전환" aria-pressed="${Boolean(part.value)}"><rect x="-18" y="2" width="36" height="20" rx="6"/><text y="17">${part.value}</text></g>` : ""}
+    ${pulse ? `<g class="logic-toggle" data-logic-toggle="${part.id}" data-pulse-level data-signal="${part.value}" role="button" tabindex="0" aria-label="펄스 ${part.running ? "일시정지" : "시작"}" aria-pressed="${part.running}">
+      <title>${part.frequency} Hz · HIGH ${part.duty}%</title><rect x="-25" y="2" width="50" height="20" rx="6"/>
+      <text y="17"><tspan>${part.value}</tspan> ${part.running ? "Ⅱ" : "▶"}</text>
+    </g>` : ""}
     ${[...inputs, ...outputs].map(({ pin, name }) => {
       const isOut = outputs.some((port) => port.pin === pin);
       const [x, y] = pinOffset(part, pin, isOut);
@@ -139,6 +163,7 @@ function draw(values) {
   byId("logic-delete").disabled = !selection;
   viewChipJson.disabled = !selectedChip();
   inspectChip.disabled = !selectedChip();
+  syncPulseSettings();
   byId("logic-cancel").hidden = !placing && !pending;
   board.classList.toggle("placing", Boolean(placing || gesture?.type));
   for (const button of palette.querySelectorAll("button")) {
@@ -155,7 +180,85 @@ function update(message = instructions, changed = true) {
     draw(null);
     status.textContent = error.message;
   }
+  syncPulseAnimation();
 }
+
+function refreshSignals(values) {
+  for (const item of partLayer.children) {
+    const readings = values.get(Number(item.dataset.logicPart));
+    for (const pin of item.querySelectorAll(".logic-pin")) {
+      const value = signal(readings[Number(pin.dataset.logicPin)]);
+      if (pin.dataset.signal === String(value)) continue;
+      pin.dataset.signal = value;
+      pin.setAttribute("aria-label", pin.getAttribute("aria-label").replace(/, [01X]$/, ", " + textValue(value)));
+    }
+    const output = item.querySelector(".logic-value");
+    if (output) {
+      const value = signal(readings[0]);
+      output.dataset.signal = value;
+      output.textContent = textValue(value);
+    }
+    const pulse = item.querySelector("[data-pulse-level]");
+    if (pulse) {
+      pulse.dataset.signal = signal(readings[2]);
+      pulse.querySelector("tspan").textContent = textValue(readings[2]);
+    }
+  }
+  wires.forEach(({ a: [id, pin] }, index) => {
+    wireLayer.children[index].querySelector(".logic-signal").dataset.signal = signal(values.get(id)[pin]);
+  });
+}
+
+function syncPulseAnimation() {
+  const running = !workspace.hidden && parts.some((part) => part.type === "pulse" && part.running);
+  if (running && pulseFrame === null) pulseFrame = requestAnimationFrame(advancePulses);
+  if (!running && pulseFrame !== null) {
+    cancelAnimationFrame(pulseFrame);
+    pulseFrame = null;
+  }
+}
+
+function advancePulses(now) {
+  pulseFrame = null;
+  if (workspace.hidden) return;
+  let changed = false;
+  for (const pulse of parts) {
+    if (pulse.type !== "pulse" || !pulse.running) continue;
+    if (!pulseStarts.has(pulse.id)) pulseStarts.set(pulse.id, now);
+    const cycles = Math.max(0, now - pulseStarts.get(pulse.id)) * pulse.frequency / 1000;
+    const value = Number(cycles % 1 < pulse.duty / 100);
+    if (value !== pulse.value) {
+      pulse.value = value;
+      changed = true;
+    }
+  }
+  if (changed) {
+    try {
+      refreshSignals(boardSignals(parts, wires, chips, solveLogic));
+    } catch (error) {
+      status.textContent = error.message;
+      return;
+    }
+  }
+  syncPulseAnimation();
+}
+
+function validPulseTiming(frequency, duty) {
+  return Number.isFinite(frequency) && frequency >= 0.1 && frequency <= 10 &&
+    Number.isFinite(duty) && duty >= 10 && duty <= 90;
+}
+
+pulseSettings.addEventListener("submit", (event) => {
+  event.preventDefault();
+  const pulse = selectedPulse();
+  const frequency = pulseFrequency.valueAsNumber;
+  const duty = pulseDuty.valueAsNumber;
+  if (!pulse || !validPulseTiming(frequency, duty)) return;
+  Object.assign(pulse, { frequency, duty });
+  pulseStarts.delete(pulse.id);
+  if (pulse.running) pulse.value = 1;
+  update(`펄스를 ${frequency} Hz, HIGH ${duty}%로 설정했습니다.`);
+});
 
 function move(part, x, y) {
   const chip = chips.get(part.type);
@@ -167,6 +270,7 @@ function move(part, x, y) {
 
 function add(type, x, y, label) {
   const part = { id: nextId++, type, value: 0, label };
+  if (type === "pulse") Object.assign(part, pulseDefaults);
   move(part, x, y);
   parts.push(part);
   return part;
@@ -184,7 +288,8 @@ function place(type, x, y) {
   }
   selection = { kind: "part", id: add(type, x, y).id };
   pending = placing = null;
-  update(`${nameOf(type)} 배치 완료. 단자를 눌러 연결하세요.`);
+  update(type === "pulse" ? "출력 단자를 연결하세요. Ⅱ로 일시정지하고, 아래에서 주파수와 HIGH 비율을 바꿀 수 있습니다." :
+    `${nameOf(type)} 배치 완료. 단자를 눌러 연결하세요.`);
 }
 
 function connect(end) {
@@ -223,8 +328,15 @@ function activate(target) {
   const wire = target.closest("[data-logic-wire]");
   if (toggle) {
     const input = parts.find(({ id }) => id === Number(toggle.dataset.logicToggle));
-    input.value = 1 - input.value;
     selection = { kind: "part", id: input.id };
+    if (input.type === "pulse") {
+      input.running = !input.running;
+      pulseStarts.delete(input.id);
+      if (input.running) input.value = 1;
+      update(input.running ? "펄스 발생기를 시작했습니다." : "펄스 발생기를 일시정지했습니다.");
+      return;
+    }
+    input.value = 1 - input.value;
     update(`${input.label ?? "입력 스위치"}를 ${input.value}로 바꿨습니다.`);
     return;
   }
@@ -330,6 +442,7 @@ function finish(event, cancelled = false) {
   byId("logic-cancel").hidden = true;
   byId("logic-delete").disabled = false;
   viewChipJson.disabled = inspectChip.disabled = !selectedChip();
+  syncPulseSettings();
   status.textContent = instructions;
 }
 for (const target of [board, palette]) {
@@ -430,6 +543,7 @@ byId("logic-cancel").addEventListener("click", () => {
 byId("logic-delete").addEventListener("click", () => {
   if (!selection) return;
   if (selection.kind === "part") {
+    pulseStarts.delete(selection.id);
     parts = parts.filter(({ id }) => id !== selection.id);
     wires = wires.filter(({ a, b }) => a[0] !== selection.id && b[0] !== selection.id);
   } else wires = wires.filter(({ id }) => id !== selection.id);
@@ -437,6 +551,7 @@ byId("logic-delete").addEventListener("click", () => {
   update("선택한 항목을 삭제했습니다.");
 });
 byId("logic-clear").addEventListener("click", () => {
+  pulseStarts.clear();
   parts = [];
   wires = [];
   selection = pending = placing = null;
@@ -545,6 +660,9 @@ chipToggle.addEventListener("click", () => {
 byId("logic-chip-create").addEventListener("click", () => {
   try {
     showChip(chipFromBoard(chipName.value.trim(), parts, wires, chips));
+    if (parts.some(({ type }) => type === "pulse")) {
+      chipStatus.textContent += " 펄스 발생기의 신호는 칩의 외부 CLK 입력으로 연결합니다.";
+    }
   } catch (error) {
     chipStatus.textContent = error.message;
   }
@@ -644,6 +762,11 @@ function restore() {
       if (typeof part?.type !== "string" || (!Object.hasOwn(types, part.type) && !sharedChips.has(part.type)) || !validId(part.id) ||
           ![0, 1].includes(part.value) || !Number.isFinite(part.x) || !Number.isFinite(part.y)) throw new Error();
       const item = { id: part.id, type: part.type, value: part.value };
+      if (part.type === "pulse") {
+        if (!validPulseTiming(part.frequency, part.duty) || typeof part.running !== "boolean") throw new Error();
+        Object.assign(item, { frequency: part.frequency, duty: part.duty, running: part.running });
+        if (item.running) item.value = 1;
+      }
       if (typeof part.label === "string" && part.label.length > 0 && part.label.length <= 24 &&
           part.label.trim() === part.label && !/[\u0000-\u001f\u007f]/u.test(part.label)) item.label = part.label;
       nextParts.set(item.id, { ...item, x: part.x, y: part.y });
@@ -672,6 +795,7 @@ function restore() {
       part.type = replacements.get(part.type) ?? part.type;
       move(part, part.x, part.y);
     }
+    pulseStarts.clear();
     parts = next;
     wires = nextWires;
     if (replacements.size) {
@@ -686,7 +810,10 @@ function restore() {
   }
 }
 
-window.addEventListener("hashchange", restore);
+window.addEventListener("hashchange", () => {
+  restore();
+  syncPulseAnimation();
+});
 loadChipLibrary();
 renderChipList();
 update();

@@ -189,6 +189,13 @@
     </div>
     <div class="board-feedback logic-feedback">
       <p id="logic-status" class="board-status" role="status"></p>
+      <form id="logic-pulse-settings" class="logic-pulse-settings" hidden>
+        <label for="logic-pulse-frequency">주파수 (Hz)</label>
+        <input id="logic-pulse-frequency" type="number" min="0.1" max="10" step="any" required>
+        <label for="logic-pulse-duty">HIGH 비율 (%)</label>
+        <input id="logic-pulse-duty" type="number" min="10" max="90" step="any" required>
+        <button type="submit">적용</button>
+      </form>
       <p class="board-view-hint touch-hint">부품을 고른 뒤 작업대를 누르세요. +로 확대하면 빈 곳을 끌어 이동할 수 있습니다.</p>
       <div class="logic-legend" aria-label="신호 색상">
         <span><i data-signal="1"></i>1 HIGH</span><span><i data-signal="0"></i>0 LOW</span><span><i data-signal="-1"></i>X 미정</span>
