@@ -130,6 +130,7 @@ button:disabled{cursor:default;opacity:.48}
 
 
 #wire-preview{fill:none;stroke:#b8e9ff;stroke-width:2.5;stroke-dasharray:6 5;pointer-events:none}
+#rotation-guide{fill:none;stroke:#ffe08c;stroke-width:2;stroke-dasharray:6 5;vector-effect:non-scaling-stroke;pointer-events:none}
 #board.moving-part,#board.rotating-part,#board.rotating-part .terminal{cursor:grabbing}
 .part-angle{color:var(--muted);font-variant-numeric:tabular-nums}
 

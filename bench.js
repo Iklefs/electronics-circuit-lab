@@ -10,6 +10,7 @@ const boardSurface = byId("board-surface");
 const partLayer = byId("part-layer");
 const wireLayer = byId("wire-layer");
 const wirePreview = byId("wire-preview");
+const rotationGuide = byId("rotation-guide");
 const draftPoints = byId("draft-points");
 const editor = byId("part-editor");
 const editorInput = byId("part-value");
@@ -35,6 +36,7 @@ const height = 520;
 const maxParts = 30;
 const maxWires = 60;
 const maxPoints = 12;
+const rotationStep = 90;
 const historyLimit = 100;
 let parts = [];
 let wires = [];
@@ -291,7 +293,7 @@ function partMarkup(part) {
     const active = pending && keyOf(pending) === key;
     const label = terminalLabel(part, pin);
     const value = result?.volts.get(key);
-    return `<circle class="terminal${active ? " pending" : ""}" data-terminal="${pin}" data-part="${part.id}" cx="${x - part.x}" cy="${y - part.y}" r="7" role="button" tabindex="0" aria-label="${spec.name} ${part.id} ${label} 단자"><title>클릭해 배선 연결 · 끌어서 회전</title></circle>
+    return `<circle class="terminal${active ? " pending" : ""}" data-terminal="${pin}" data-part="${part.id}" cx="${x - part.x}" cy="${y - part.y}" r="7" role="button" tabindex="0" aria-label="${spec.name} ${part.id} ${label} 단자"><title>점선 안에서 끌어 ${rotationStep}° 회전 · 밖으로 끌거나 눌러 배선 연결</title></circle>
       ${result ? `<text class="voltage-label" x="${x - part.x}" y="${y - part.y - 12}">${value === undefined ? "—" : number(value, "V")}</text>` : ""}`;
   }).join("");
   const captionY = Math.abs(Math.sin(part.angle * Math.PI / 180)) > 0.35 && part.type !== "ground" ? 73 : 48;
@@ -491,7 +493,7 @@ byId("scope-jump").addEventListener("click", () => {
 byId("editor-close").addEventListener("click", () => closeEditor(true));
 byId("rotate-part").addEventListener("click", () => {
   if (!editing) return;
-  editing.angle = (editing.angle + 90) % 360;
+  editing.angle = ((Math.floor(editing.angle / rotationStep) + 1) * rotationStep) % 360;
   recordEdit();
   update();
 });
@@ -529,7 +531,7 @@ function draw() {
   drawDraft();
   partLayer.innerHTML = parts.map(partMarkup).join("");
   board.classList.toggle("placing", Boolean(placing));
-  byId("bench-cancel").hidden = !placing && !pending;
+  byId("bench-cancel").hidden = !placing && (!pending || drag?.wiring);
   for (const button of palette.querySelectorAll("button")) {
     button.setAttribute("aria-pressed", String(placing === button.dataset.type));
   }
@@ -631,17 +633,22 @@ function bendAt(x, y) {
   ];
 }
 
-function connect(id, pin) {
+function startWire(end) {
   closeEditor();
+  pending = end;
+  bends = [];
+  selection = null;
+  status.textContent = "다른 단자에 연결하세요. 빈 곳을 누르면 경유점을 추가할 수 있습니다.";
+  draw();
+}
+
+function connect(id, pin) {
   const end = [id, pin];
   if (!pending) {
-    pending = end;
-    bends = [];
-    selection = null;
-    status.textContent = "빈 곳을 눌러 경유점을 추가하고 두 번째 단자를 눌러 연결하세요. Esc로 취소합니다.";
-    draw();
+    startWire(end);
     return;
   }
+  closeEditor();
   if (keyOf(end) === keyOf(pending)) {
     status.textContent = "배선 연결을 취소했습니다.";
   } else if (wires.some((wire) => sameWire(wire, pending, end))) {
@@ -757,6 +764,15 @@ function bearing(part, x, y) {
   return Math.atan2(y - part.y, x - part.x) * 180 / Math.PI;
 }
 
+function terminalAt(event) {
+  return document.elementFromPoint(event.clientX, event.clientY)?.closest("[data-terminal]");
+}
+
+function draftEnd(event, x, y) {
+  const terminal = terminalAt(event);
+  return terminal ? pinPosition([Number(terminal.dataset.part), Number(terminal.dataset.terminal)]) : [x, y];
+}
+
 board.addEventListener("pointerdown", (event) => {
   if (!event.isPrimary || drag || placing || paletteDrag) return;
   const panOnEmpty = event.button === 0 && event.target === boardSurface && !pending;
@@ -779,7 +795,7 @@ board.addEventListener("pointerdown", (event) => {
   }
   const terminal = event.target.closest("[data-terminal]");
   const body = event.target.closest("[data-body]");
-  if (!terminal && !body) return;
+  if ((!terminal && !body) || (terminal && pending)) return;
   const id = Number(terminal ? terminal.dataset.part : body.dataset.body);
   const part = parts.find((item) => item.id === id);
   const { x, y } = point(event);
@@ -788,6 +804,14 @@ board.addEventListener("pointerdown", (event) => {
     bearing: bearing(part, x, y), pin: terminal ? Number(terminal.dataset.terminal) : null,
     pointer: event.pointerId, moved: false,
   };
+  if (terminal) {
+    drag.rotationRadius = Math.max(42, ...pinsFor(part).map(([dx, dy]) => Math.hypot(dx, dy))) + 34;
+    rotationGuide.setAttribute("cx", part.x);
+    rotationGuide.setAttribute("cy", part.y);
+    rotationGuide.setAttribute("r", drag.rotationRadius);
+    rotationGuide.removeAttribute("hidden");
+    status.textContent = `점선 안에서 ${rotationStep}°씩 회전합니다. 점선 밖으로 끌면 배선을 시작합니다.`;
+  }
   board.setPointerCapture(event.pointerId);
 });
 board.addEventListener("pointermove", (event) => {
@@ -818,8 +842,23 @@ board.addEventListener("pointermove", (event) => {
     drawWires();
     return;
   }
+  if (drag.wiring) {
+    drawDraft(draftEnd(event, x, y));
+    return;
+  }
   if (!drag.moved && Math.hypot(x - drag.x, y - drag.y) < 5) return;
   const { part, pin } = drag;
+  const radius = Math.hypot(x - part.x, y - part.y);
+  if (pin !== null && radius > drag.rotationRadius) {
+    drag.wiring = true;
+    part.angle = drag.startAngle;
+    rotationGuide.setAttribute("hidden", "");
+    board.classList.remove("rotating-part");
+    byId("bench-share-box").hidden = true;
+    startWire([part.id, pin]);
+    drawDraft(draftEnd(event, x, y));
+    return;
+  }
   if (!drag.moved) {
     drag.moved = true;
     closeEditor();
@@ -834,9 +873,10 @@ board.addEventListener("pointermove", (event) => {
     move(part, drag.startX + x - drag.x, drag.startY + y - drag.y);
     item.setAttribute("transform", `translate(${part.x} ${part.y})`);
   } else {
-    if (Math.hypot(x - part.x, y - part.y) > 8) {
+    if (radius > 8) {
       const delta = bearing(part, x, y) - drag.bearing;
-      part.angle = (Math.round(drag.startAngle + delta) + 720) % 360;
+      const snapped = Math.round((drag.startAngle + delta) / rotationStep) * rotationStep;
+      part.angle = (snapped + 720) % 360;
     }
     item.outerHTML = partMarkup(part);
     status.textContent = `회전 중 · ${part.angle}°`;
@@ -864,13 +904,25 @@ function finishDrag(event, cancelled = false) {
     draw();
     return;
   }
-  const { part, pin, moved, startX, startY, startAngle } = drag;
+  const { part, pin, moved, wiring, startX, startY, startAngle } = drag;
   drag = null;
+  rotationGuide.setAttribute("hidden", "");
   board.classList.remove("moving-part", "rotating-part");
   if (cancelled) {
+    if (wiring) pending = null;
     Object.assign(part, { x: startX, y: startY, angle: startAngle });
     status.textContent = defaultStatus;
     draw();
+    return;
+  }
+  if (wiring) {
+    const terminal = terminalAt(event);
+    if (terminal) connect(Number(terminal.dataset.part), Number(terminal.dataset.terminal));
+    else {
+      const position = dropPoint(event);
+      draw();
+      if (position) drawDraft([position.x, position.y]);
+    }
     return;
   }
   if (!moved && pin !== null) {
