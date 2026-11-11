@@ -169,6 +169,7 @@
     <header class="board-bar">
       <div><p class="eyebrow">논리회로</p><strong id="logic-count">부품 0개 · 배선 0개</strong></div>
       <div class="board-actions"><button id="logic-delete" type="button" disabled>선택 삭제</button>
+        <button id="logic-chip-inspect" type="button" disabled>내부 회로 보기</button>
         <button id="logic-clear" type="button" disabled>모두 지우기</button>
         <button id="logic-cancel" type="button" hidden>취소</button>
         <div id="logic-zoom" class="board-zoom" role="group" aria-label="논리회로 확대 및 축소">
@@ -194,6 +195,20 @@
       </div>
     </div>
   </section>
+  <dialog id="logic-chip-dialog" class="chip-diagram-dialog" aria-labelledby="chip-diagram-title">
+    <div class="chip-diagram-header">
+      <div><h2 id="chip-diagram-title"></h2><p id="chip-diagram-count"></p></div>
+      <div class="chip-diagram-actions">
+        <button id="chip-diagram-out" type="button" aria-label="내부 회로 축소">−</button>
+        <button id="chip-diagram-fit" type="button">전체 맞춤</button>
+        <button id="chip-diagram-in" type="button" aria-label="내부 회로 확대">+</button>
+        <form method="dialog"><button type="submit" autofocus>닫기</button></form>
+      </div>
+    </div>
+    <div id="chip-diagram-scroll" class="chip-diagram-scroll" tabindex="0" aria-label="내부 회로 스크롤 영역">
+      <svg id="chip-diagram" role="img" aria-label="입력, 게이트, 출력을 잇는 내부 회로"></svg>
+    </div>
+  </dialog>
 </main>
 <main id="rc-lab" hidden>
 <div class="intro"><p class="eyebrow">회로 기초 / 실험 01</p><h1>RC 충전과 방전</h1><p>저항과 커패시터를 바꿔 전압이 시간에 따라 어떻게 변하는지 살펴보세요.</p></div>

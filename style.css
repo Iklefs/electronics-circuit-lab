@@ -241,6 +241,26 @@ body.workbench-expanded{overflow:hidden}
 .logic-chip-preview text{fill:#eff6ff;font-size:6.7px;font-weight:750;text-anchor:middle}
 .logic-chip-summary{fill:#a8bdd7;font-size:10px;text-anchor:middle}
 .logic-chip-zoom-hint{display:none}
+.chip-diagram-dialog{width:min(1120px,calc(100% - 1.25rem));max-width:none;padding:0;border:1px solid #415a78;border-radius:14px;background:#12213a;color:#eff6ff}
+.chip-diagram-dialog::backdrop{background:#091423b8}
+.chip-diagram-header{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:.65rem;padding:.75rem 1rem}
+.chip-diagram-header h2{overflow-wrap:anywhere}
+.chip-diagram-header p{margin:.25rem 0 0;color:#b8cbe5;font-size:.78rem}
+.chip-diagram-actions{display:flex;gap:.3rem;align-items:center;flex-wrap:wrap}
+.chip-diagram-actions button{background:#213a57;color:#eff6ff;border-color:#506d8f;padding:.45rem .7rem}
+.chip-diagram-actions form{margin:0}
+.chip-diagram-scroll{height:min(68dvh,640px);overflow:auto;overscroll-behavior:contain;background:#101e33;border-top:1px solid #415a78}
+#chip-diagram{display:block;max-width:none}
+.chip-diagram-wire{fill:none;stroke:#8dbbda;stroke-width:1.6;stroke-linejoin:round}
+.chip-diagram-wire:hover{stroke:#ffdc82;stroke-width:3}
+.chip-diagram-wire.open-pin{stroke:#a8afc0;stroke-dasharray:3 3}
+.chip-diagram-node rect{fill:#203752;stroke:#7899c2;stroke-width:1.5}
+.chip-diagram-node.input rect{fill:#193d42;stroke:#69cbb0}
+.chip-diagram-node.output rect{fill:#253e5d;stroke:#9abaeb}
+.chip-diagram-node circle{fill:#12213a;stroke:#b5d2ef;stroke-width:1.4}
+.chip-diagram-node text{fill:#eff6ff;text-anchor:middle;font-size:14px;font-weight:700;pointer-events:none}
+.chip-diagram-node .chip-diagram-id{fill:#aec5e3;font-size:10px;font-weight:500}
+.chip-diagram-column{fill:#b5cce8;font-size:13px;font-weight:700}
 .logic-chip-list{margin-top:.5rem}
 .logic-chip-list button{max-width:100%;white-space:normal;overflow-wrap:anywhere}
 .logic-chip-panel{display:grid;gap:.55rem}
@@ -283,6 +303,7 @@ body.workbench-expanded{overflow:hidden}
 }
 
 @media(pointer:coarse){
+  .chip-diagram-actions button{min-height:44px}
   #board,#logic-board{touch-action:none}
   button,.lab-nav a{touch-action:manipulation}
   #editor-reading{display:block}

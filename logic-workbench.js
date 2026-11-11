@@ -1,6 +1,7 @@
 import { solveLogic } from "./wasm-engine.js";
 import { createBoardCamera } from "./board-camera.js";
 import { chipPinY, chipPreview } from "./logic-chip-preview.js";
+import { fullChipDiagram } from "./logic-chip-diagram.js";
 
 import { boardSignals, chipFromBoard, flattenLogic, logicPins, logicTypes as types,
   maxLogicParts as maxParts, maxLogicWires as maxWires, validateChip } from "./logic-circuit.js";
@@ -23,6 +24,12 @@ const chipJson = byId("logic-chip-json");
 const chipName = byId("logic-chip-name");
 const chipStatus = byId("logic-chip-status");
 const viewChipJson = byId("logic-chip-view");
+const inspectChip = byId("logic-chip-inspect");
+const chipDialog = byId("logic-chip-dialog");
+const diagram = byId("chip-diagram");
+const diagramScroll = byId("chip-diagram-scroll");
+const zoomDiagramOut = byId("chip-diagram-out");
+const zoomDiagramIn = byId("chip-diagram-in");
 const chipStorageKey = "circuit-lab.logic-chips.v1";
 const chipId = /^chip-[a-z0-9-]{1,50}$/;
 const maxJsonLength = 60000;
@@ -36,6 +43,9 @@ let placing = null;
 let selection = null;
 let gesture = null;
 let loadedHash;
+let diagramLayout;
+let diagramScale = 1;
+let dialogTrigger;
 const { view: camera, set: setCamera, point } = createBoardCamera(board, {
   width, height, controls: byId("logic-zoom"), busy: () => Boolean(gesture),
 });
@@ -94,7 +104,7 @@ function partMarkup(part, values) {
       <rect x="${-bodyWidth / 2}" y="${-bodyHeight / 2}" width="${bodyWidth}" height="${bodyHeight}" rx="11"/>
       <text class="logic-name" y="${chip ? 17 - bodyHeight / 2 : input || output ? -7 : 5}">${caption}</text>
       ${preview}
-      ${chip ? `<text class="logic-chip-summary${preview ? " logic-chip-zoom-hint" : ""}" y="14">${preview ? "확대해 보기" : "내부 회로 생략"}</text>` : ""}
+      ${chip ? `<text class="logic-chip-summary${preview ? " logic-chip-zoom-hint" : ""}" y="14">${preview ? "내부 회로 보기" : "내부 회로 생략"}</text>` : ""}
       ${output ? `<text class="logic-value" data-signal="${value}" y="16">${textValue(value)}</text>` : ""}
     </g>
     ${input ? `<g class="logic-toggle" data-logic-toggle="${part.id}" data-signal="${part.value}" role="button" tabindex="0" aria-label="${label} 입력 전환" aria-pressed="${Boolean(part.value)}"><rect x="-18" y="2" width="36" height="20" rx="6"/><text y="17">${part.value}</text></g>` : ""}
@@ -127,6 +137,7 @@ function draw(values) {
   byId("logic-example").disabled = parts.length > 0;
   byId("logic-delete").disabled = !selection;
   viewChipJson.disabled = !selectedChip();
+  inspectChip.disabled = !selectedChip();
   byId("logic-cancel").hidden = !placing && !pending;
   board.classList.toggle("placing", Boolean(placing || gesture?.type));
   for (const button of palette.querySelectorAll("button")) {
@@ -246,7 +257,7 @@ board.addEventListener("pointerdown", (event) => {
   if (!body) return;
   const part = parts.find(({ id }) => id === Number(body.dataset.logicBody));
   gesture = { ...start, part, anchor: point(event), original: [part.x, part.y] };
-  board.setPointerCapture(event.pointerId);
+  body.setPointerCapture(event.pointerId);
 });
 
 function moveGesture(event) {
@@ -306,7 +317,19 @@ function finish(event, cancelled = false) {
   }
   selection = { kind: "part", id: part.id };
   pending = null;
-  update(instructions, moved);
+  if (moved) {
+    update(instructions);
+    return;
+  }
+  // Keep the clicked SVG element in place so the browser can target a double click.
+  for (const node of partLayer.children) node.classList.toggle("selected", Number(node.dataset.logicPart) === part.id);
+  wireLayer.querySelector(".selected")?.classList.remove("selected");
+  partLayer.querySelector(".logic-pin.pending")?.classList.remove("pending");
+  draft.setAttribute("hidden", "");
+  byId("logic-cancel").hidden = true;
+  byId("logic-delete").disabled = false;
+  viewChipJson.disabled = inspectChip.disabled = !selectedChip();
+  status.textContent = instructions;
 }
 for (const target of [board, palette]) {
   target.addEventListener("pointerdown", () => { suppressClick = false; });
@@ -336,6 +359,68 @@ board.addEventListener("click", (event) => {
   }
 });
 
+board.addEventListener("dblclick", (event) => {
+  if (placing || gesture) return;
+  const body = event.target.closest("[data-logic-body]");
+  const part = body && parts.find(({ id }) => id === Number(body.dataset.logicBody));
+  const chip = part && chips.get(part.type);
+  if (chip) openChipDialog(chip, body);
+});
+
+function diagramFit() {
+  return Math.min(1, diagramScroll.clientWidth / diagramLayout.width,
+    diagramScroll.clientHeight / diagramLayout.height);
+}
+
+function setDiagramScale(scale) {
+  diagramScale = scale;
+  diagram.setAttribute("width", Math.floor(diagramLayout.width * scale));
+  diagram.setAttribute("height", Math.floor(diagramLayout.height * scale));
+  zoomDiagramOut.disabled = scale <= diagramFit();
+  zoomDiagramIn.disabled = scale >= 2.5;
+}
+
+function fitDiagram() {
+  setDiagramScale(diagramFit());
+  diagramScroll.scrollTo(0, 0);
+}
+
+function zoomDiagram(factor) {
+  const centerX = diagramScroll.clientWidth / 2;
+  const centerY = diagramScroll.clientHeight / 2;
+  const x = diagramScroll.scrollLeft + centerX;
+  const y = diagramScroll.scrollTop + centerY;
+  const oldScale = diagramScale;
+  const next = factor > 1 ? Math.max(0.25, oldScale * factor) : oldScale * factor;
+  setDiagramScale(Math.max(diagramFit(), Math.min(2.5, next)));
+  const ratio = diagramScale / oldScale;
+  diagramScroll.scrollTo(x * ratio - centerX, y * ratio - centerY);
+}
+
+function openChipDialog(chip, trigger) {
+  if (chipDialog.open) return;
+  diagramLayout = fullChipDiagram(chip);
+  dialogTrigger = trigger;
+  byId("chip-diagram-title").textContent = chip.name + " 내부 회로";
+  byId("chip-diagram-count").textContent = `입력 ${chip.inputs.length}개 · 게이트 ${chip.gates.length}개 · 출력 ${chip.outputs.length}개`;
+  diagram.setAttribute("viewBox", `0 0 ${diagramLayout.width} ${diagramLayout.height}`);
+  diagram.innerHTML = diagramLayout.content;
+  chipDialog.showModal();
+  fitDiagram();
+}
+
+inspectChip.addEventListener("click", () => {
+  const chip = selectedChip();
+  if (chip) openChipDialog(chip, inspectChip);
+});
+byId("chip-diagram-fit").addEventListener("click", fitDiagram);
+zoomDiagramOut.addEventListener("click", () => zoomDiagram(1 / 1.4));
+zoomDiagramIn.addEventListener("click", () => zoomDiagram(1.4));
+chipDialog.addEventListener("close", () => {
+  dialogTrigger?.focus({ preventScroll: true });
+  dialogTrigger = null;
+});
+
 byId("logic-cancel").addEventListener("click", () => {
   pending = placing = null;
   update(instructions, false);
@@ -357,7 +442,7 @@ byId("logic-clear").addEventListener("click", () => {
   update("작업대를 비웠습니다.");
 });
 document.addEventListener("keydown", (event) => {
-  if (workspace.hidden || event.target.matches("input, textarea, select")) return;
+  if (workspace.hidden || chipDialog.open || event.target.matches("input, textarea, select")) return;
   if (event.key === "Escape") {
     if (gesture) finish({ pointerId: gesture.pointer }, true);
     pending = placing = null;
