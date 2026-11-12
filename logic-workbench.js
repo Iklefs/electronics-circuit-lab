@@ -2,6 +2,7 @@ import { solveLogic } from "./wasm-engine.js";
 import { createBoardCamera } from "./board-camera.js";
 import { chipPinY, chipPreview } from "./logic-chip-preview.js";
 import { fullChipDiagram } from "./logic-chip-diagram.js";
+import { createLogicScope } from "./logic-scope.js";
 import { bindExamplePicker, buildExample, logicExamples } from "./circuit-examples.js";
 
 import { boardSignals, chipFromBoard, flattenLogic, logicPins, logicTypes as types,
@@ -53,6 +54,9 @@ let diagramLayout;
 let diagramScale = 1;
 let dialogTrigger;
 let pulseFrame = null;
+let pulseTime = null;
+let logicSignals = null;
+const logicScope = createLogicScope(syncPulseAnimation);
 let editedPulseId = null;
 const { view: camera, set: setCamera, point } = createBoardCamera(board, {
   width, height, controls: byId("logic-zoom"), busy: () => Boolean(gesture),
@@ -173,10 +177,13 @@ function draw(values) {
 
 function update(message = instructions, changed = true) {
   if (changed) share.hidden = true;
+  logicScope.sync(parts, chips);
   try {
-    draw(boardSignals(parts, wires, chips, solveLogic));
+    logicSignals = boardSignals(parts, wires, chips, solveLogic);
+    draw(logicSignals);
     status.textContent = message;
   } catch (error) {
+    logicSignals = null;
     draw(null);
     status.textContent = error.message;
   }
@@ -210,35 +217,67 @@ function refreshSignals(values) {
 }
 
 function syncPulseAnimation() {
-  const running = !workspace.hidden && parts.some((part) => part.type === "pulse" && part.running);
+  const running = !workspace.hidden &&
+    (logicScope.isRecording() || parts.some((part) => part.type === "pulse" && part.running));
   if (running && pulseFrame === null) pulseFrame = requestAnimationFrame(advancePulses);
   if (!running && pulseFrame !== null) {
     cancelAnimationFrame(pulseFrame);
     pulseFrame = null;
   }
+  if (!running) pulseTime = null;
 }
 
 function advancePulses(now) {
   pulseFrame = null;
   if (workspace.hidden) return;
-  let changed = false;
+  const previous = pulseTime ?? now;
+  pulseTime = now;
+  const recording = logicScope.isRecording();
+  const recent = now - previous <= 100;
+  if (recording && !recent) logicScope.breakRecording();
+  const pulses = [];
+  const edges = [];
   for (const pulse of parts) {
     if (pulse.type !== "pulse" || !pulse.running) continue;
     if (!pulseStarts.has(pulse.id)) pulseStarts.set(pulse.id, now);
-    const cycles = Math.max(0, now - pulseStarts.get(pulse.id)) * pulse.frequency / 1000;
-    const value = Number(cycles % 1 < pulse.duty / 100);
-    if (value !== pulse.value) {
+    const start = pulseStarts.get(pulse.id);
+    const period = 1000 / pulse.frequency;
+    const highTime = period * pulse.duty / 100;
+    if (recording && recent && start <= previous) {
+      // Record edges between frames too, including HIGH intervals shorter than a frame.
+      for (let begin = start + Math.floor((previous - start) / period) * period; begin <= now; begin += period) {
+        if (begin > previous) edges.push({ time: begin, pulse, value: 1 });
+        const fall = begin + highTime;
+        if (fall > previous && fall <= now) edges.push({ time: fall, pulse, value: 0 });
+      }
+    } else {
+      pulses.push({ pulse, value: Number((now - start) % period < highTime) });
+    }
+  }
+  try {
+    const initialSignals = logicSignals;
+    edges.sort((a, b) => a.time - b.time);
+    for (let index = 0; index < edges.length;) {
+      const { time } = edges[index];
+      do {
+        const { pulse, value } = edges[index++];
+        pulse.value = value;
+      } while (edges[index]?.time === time);
+      logicSignals = boardSignals(parts, wires, chips, solveLogic);
+      logicScope.sample(time, logicSignals);
+    }
+    let changed = false;
+    for (const { pulse, value } of pulses) {
+      if (value === pulse.value) continue;
       pulse.value = value;
       changed = true;
     }
-  }
-  if (changed) {
-    try {
-      refreshSignals(boardSignals(parts, wires, chips, solveLogic));
-    } catch (error) {
-      status.textContent = error.message;
-      return;
-    }
+    if (changed) logicSignals = boardSignals(parts, wires, chips, solveLogic);
+    if (logicSignals && logicSignals !== initialSignals) refreshSignals(logicSignals);
+    logicScope.sample(now, logicSignals);
+  } catch (error) {
+    status.textContent = error.message;
+    return;
   }
   syncPulseAnimation();
 }
@@ -552,6 +591,7 @@ byId("logic-delete").addEventListener("click", () => {
 });
 byId("logic-clear").addEventListener("click", () => {
   pulseStarts.clear();
+  logicScope.reset();
   parts = [];
   wires = [];
   selection = pending = placing = null;
@@ -796,6 +836,7 @@ function restore() {
       move(part, part.x, part.y);
     }
     pulseStarts.clear();
+    logicScope.reset();
     parts = next;
     wires = nextWires;
     if (replacements.size) {
@@ -812,6 +853,7 @@ function restore() {
 
 window.addEventListener("hashchange", () => {
   restore();
+  if (workspace.hidden) logicScope.breakRecording();
   syncPulseAnimation();
 });
 loadChipLibrary();

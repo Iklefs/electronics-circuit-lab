@@ -51,7 +51,6 @@ pub struct TimeStep {
 
 #[derive(Debug)]
 pub enum Error {
-    NoGround,
     OpenCurrentSource,
     Singular,
     NonConvergent,
@@ -59,6 +58,7 @@ pub enum Error {
 
 pub struct Reading {
     pub volts: Vec<f64>,
+    pub reference_groups: Vec<f64>,
     pub currents: Vec<f64>,
     pub history: Vec<f64>,
     pub wire_currents: Vec<f64>,
@@ -302,10 +302,6 @@ pub fn measure(
     wires: &[[usize; 2]],
     transient: Option<TimeStep>,
 ) -> Result<Reading, Error> {
-    use PartKind::*;
-    if !parts.iter().any(|part| part.kind == Ground) {
-        return Err(Error::NoGround);
-    }
     let ground = parts.len() * PIN_STRIDE;
     let ideal = ideal_connections(parts, ground);
     let mut parents: Vec<_> = (0..=ground).collect();
@@ -322,33 +318,49 @@ pub fn measure(
     }
     let nodes: Vec<_> = (0..=ground).map(|pin| root(&parents, pin)).collect();
     let mut branches = branches(parts, &nodes, transient);
-    let mut grounded = vec![false; ground + 1];
-    grounded[ground] = true;
-    loop {
-        let mut changed = false;
-        for branch in &branches {
-            let [a, b] = branch.nodes;
-            if !matches!(branch.model, Model::Current(_)) && grounded[a] != grounded[b] {
-                grounded[a] = true;
-                grounded[b] = true;
-                changed = true;
-            }
+    // A voltage can be compared only within an island with a common reference.
+    // An ideal current source specifies no voltage difference between its ends.
+    let mut network: Vec<_> = (0..=ground).collect();
+    let mut active = vec![false; ground + 1];
+    active[ground] = true;
+    for branch in &branches {
+        let [a, b] = branch.nodes;
+        if !matches!(branch.model, Model::Current(_)) {
+            active[a] = true;
+            active[b] = true;
+            let (a, b) = (root(&network, a), root(&network, b));
+            network[a] = b;
         }
-        if !changed {
-            break;
+    }
+    let groups: Vec<_> = (0..=ground).map(|node| root(&network, node)).collect();
+    let ground_group = groups[ground];
+    let mut references = vec![None; ground + 1];
+    references[ground_group] = Some(ground);
+    for branch in &branches {
+        if matches!(branch.model, Model::Voltage(_)) {
+            let negative = branch.nodes[1];
+            references[groups[negative]].get_or_insert(negative);
+        }
+    }
+    for node in 0..ground {
+        if active[node] {
+            references[groups[node]].get_or_insert(node);
         }
     }
     if branches.iter().any(|branch| {
         let [a, b] = branch.nodes;
-        matches!(branch.model, Model::Current(i) if i > 0.0) && grounded[a] != grounded[b]
+        matches!(branch.model, Model::Current(i) if i != 0.0)
+            && (active[a] || active[b])
+            && groups[a] != groups[b]
     }) {
         return Err(Error::OpenCurrentSource);
     }
-    branches.retain(|branch| branch.nodes.iter().all(|&node| grounded[node]));
+    branches.retain(|branch| branch.nodes.iter().all(|&node| active[node]));
+    let is_reference = |node: usize| references[groups[node]] == Some(node);
     let mut indices = vec![None; ground + 1];
     let mut count = 0;
     for node in 0..ground {
-        if grounded[node] {
+        if active[node] && !is_reference(node) {
             indices[node] = Some(count);
             count += 1;
         }
@@ -366,7 +378,7 @@ pub fn measure(
         })
         .collect();
     let voltage = |node: usize, values: &[f64]| {
-        if node == ground {
+        if is_reference(node) {
             0.0
         } else {
             indices[node].map_or(f64::NAN, |i| values[i])
@@ -417,25 +429,39 @@ pub fn measure(
         terminals[a] += current;
         terminals[b] -= current;
         let part = branch.part;
-        if parts[part].kind != Pot {
+        if parts[part].kind != PartKind::Pot {
             currents[part] = current;
         }
         if transient.is_some() {
             match parts[part].kind {
-                Capacitor => history[part] = v,
-                Inductor => history[part] = current,
+                PartKind::Capacitor => history[part] = v,
+                PartKind::Inductor => history[part] = current,
                 _ => {}
             }
         }
     }
     for (index, part) in parts.iter().enumerate() {
-        if part.kind == Open || (part.kind == Capacitor && transient.is_none()) {
+        if part.kind == PartKind::Open || (part.kind == PartKind::Capacitor && transient.is_none())
+        {
             currents[index] = 0.0;
         }
     }
     let wire_currents = recover_wire_currents(wires, &ideal, &volts, &terminals);
+    let reference_groups = nodes
+        .iter()
+        .map(|&node| {
+            if !active[node] {
+                f64::NAN
+            } else if groups[node] == ground_group {
+                0.0
+            } else {
+                (groups[node] + 1) as f64
+            }
+        })
+        .collect();
     Ok(Reading {
         volts,
+        reference_groups,
         currents,
         history,
         wire_currents,
@@ -507,4 +533,56 @@ fn recover_wire_currents(
         }
     }
     traversal.result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn part(kind: PartKind, value: f64) -> Part {
+        Part {
+            kind,
+            value,
+            pins: 2,
+            frequency: 0.0,
+            history: 0.0,
+        }
+    }
+
+    #[test]
+    fn ungrounded_rc_charges_and_discharges() {
+        let mut parts = [
+            part(PartKind::Dc, 5.0),
+            part(PartKind::Resistance, 10_000.0),
+            part(PartKind::Capacitor, 100.0),
+        ];
+        let dt = TimeStep {
+            time: 0.0,
+            step: 0.1,
+        };
+        let charging = [[0, 3], [4, 6], [7, 1]];
+        let first = measure(&parts, &charging, Some(dt)).unwrap();
+        assert!((first.history[2] - 5.0 / 11.0).abs() < 1e-9);
+        assert!(first.wire_currents[0] > 0.0);
+        assert_eq!(first.reference_groups[6], first.reference_groups[7]);
+        assert!(first.reference_groups[6] > 0.0);
+        parts[2].history = first.history[2];
+        let discharging = [[3, 7], [4, 6]];
+        let next = measure(&parts, &discharging, Some(dt)).unwrap();
+        assert!((next.history[2] - first.history[2] * 10.0 / 11.0).abs() < 1e-9);
+        assert!(next.currents[2] < 0.0);
+    }
+
+    #[test]
+    fn probe_does_not_join_independent_references() {
+        let parts = [
+            part(PartKind::Dc, 5.0),
+            part(PartKind::Dc, 9.0),
+            part(PartKind::Open, 0.0),
+        ];
+        let reading = measure(&parts, &[[0, 6], [3, 7]], None).unwrap();
+        assert_ne!(reading.reference_groups[6], reading.reference_groups[7]);
+        assert_eq!(reading.volts[6], 5.0);
+        assert_eq!(reading.volts[7], 9.0);
+    }
 }

@@ -52,6 +52,24 @@ export const analogExamples = {
     role: "커패시터는 전하를 저장해 양단 전압이 시간에 따라 변합니다.",
     try: "전환 스위치를 A로 놓아 충전하고, B로 바꿔 방전 파형을 보세요.",
   },
+  rcFloating: {
+    name: "커패시터 · 접지 없는 RC 충전",
+    role: "전원, 저항, 커패시터로 닫힌 회로를 만들면 접지 부품 없이도 충전됩니다.",
+    try: "부품 아래의 전하량 Q와 오실로스코프의 양단 전압을 보세요. 회로 재시작을 누르면 처음부터 충전합니다.",
+    scopeWindow: "5",
+    parts: [
+      ["source", "source", 150, 260, { angle: 90 }],
+      ["resistor", "resistor", 410, 125, { value: 10000 }],
+      ["cap", "capacitor", 595, 250, { angle: 90 }],
+      ["scope", "scope", 780, 250, { angle: 90 }],
+    ],
+    wires: [
+      ["source", 0, "resistor", 0, [[150, 125]]],
+      ["resistor", 1, "cap", 0, [[595, 125]]],
+      ["cap", 1, "source", 1, [[595, 385], [150, 385]]],
+      ["cap", 0, "scope", 0], ["cap", 1, "scope", 1],
+    ],
+  },
   ac: {
     name: "커패시터 · 교류 RC 필터",
     role: "저항과 커패시터를 연결하면 높은 주파수의 출력 진폭을 줄일 수 있습니다.",

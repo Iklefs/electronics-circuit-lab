@@ -1,4 +1,4 @@
-import { keyOf } from "./circuit.js";
+import { voltageBetween } from "./circuit.js";
 
 export const scopeColors = ["#72efd6", "#ffd18c", "#b6baff", "#fc9db6"];
 const byId = (id) => document.getElementById(id);
@@ -170,11 +170,8 @@ export function createScope() {
 
   function sample(reading, timestamp) {
     if (!recording || !channels.length || timestamp < nextSample) return;
-    const values = Object.fromEntries(channels.map(({ id }) => {
-      const a = reading.volts.get(keyOf([id, 0]));
-      const b = reading.volts.get(keyOf([id, 1]));
-      return [id, a === undefined || b === undefined ? undefined : a - b];
-    }));
+    const values = Object.fromEntries(channels.map(({ id }) =>
+      [id, voltageBetween(reading, [id, 0], [id, 1])]));
     time = timestamp;
     samples.push({ time, values });
     nextSample = time + Number(windowInput.value) / 960;

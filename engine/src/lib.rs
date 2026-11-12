@@ -12,7 +12,8 @@ const VOLT_OUTPUT: usize = WIRE_INPUT + MAX_WIRES * 2;
 const CURRENT_OUTPUT: usize = VOLT_OUTPUT + MAX_PARTS * PIN_STRIDE;
 const HISTORY_OUTPUT: usize = CURRENT_OUTPUT + MAX_PARTS;
 const WIRE_OUTPUT: usize = HISTORY_OUTPUT + MAX_PARTS;
-const BUFFER_SIZE: usize = WIRE_OUTPUT + MAX_WIRES;
+const REFERENCE_OUTPUT: usize = WIRE_OUTPUT + MAX_WIRES;
+const BUFFER_SIZE: usize = REFERENCE_OUTPUT + MAX_PARTS * PIN_STRIDE;
 
 // The browser writes into this buffer and calls one synchronous export at a time.
 // The WASM module has no imports or threads, so these calls cannot re-enter.
@@ -99,7 +100,6 @@ pub extern "C" fn measure_analog(
     let transient = (step > 0.0).then_some(TimeStep { time, step });
     let reading = match analog::measure(&parts, &wires, transient) {
         Ok(reading) => reading,
-        Err(Error::NoGround) => return 1,
         Err(Error::OpenCurrentSource) => return 2,
         Err(Error::Singular) => return 3,
         Err(Error::NonConvergent) => return 4,
@@ -109,6 +109,8 @@ pub extern "C" fn measure_analog(
     buffer[CURRENT_OUTPUT..CURRENT_OUTPUT + part_count].copy_from_slice(&reading.currents);
     buffer[HISTORY_OUTPUT..HISTORY_OUTPUT + part_count].copy_from_slice(&reading.history);
     buffer[WIRE_OUTPUT..WIRE_OUTPUT + wire_count].copy_from_slice(&reading.wire_currents);
+    buffer[REFERENCE_OUTPUT..REFERENCE_OUTPUT + pin_count]
+        .copy_from_slice(&reading.reference_groups[..pin_count]);
     0
 }
 

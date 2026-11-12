@@ -1,7 +1,7 @@
 import { createBoardCamera } from "./board-camera.js";
 import { analogExamples, bindExamplePicker, buildExample } from "./circuit-examples.js";
 import { components, frequencyRange, groups, pinsFor } from "./components.js";
-import { pinCount, keyOf, measure } from "./circuit.js";
+import { pinCount, keyOf, measure, voltageBetween } from "./circuit.js";
 import { createScope, scopeColors } from "./oscilloscope.js";
 import { createSimulation, isTimeDependent } from "./simulation.js";
 
@@ -70,8 +70,14 @@ const simulation = createSimulation(scope.sample, (reading) => {
   refreshMeasurements();
   if (flowMode) refreshFlow();
   for (const part of parts) {
-    if (!components[part.type].light) continue;
-    partLayer.querySelector(`.part[data-part="${part.id}"]`)?.classList.toggle("lit", lightOn(part, reading));
+    const spec = components[part.type];
+    if (spec.light) {
+      partLayer.querySelector(`.part[data-part="${part.id}"]`)?.classList.toggle("lit", lightOn(part, reading));
+    } else if (spec.model === "capacitor") {
+      const label = partLayer.querySelector(`[data-charge="${part.id}"]`);
+      const text = capacitorCharge(part);
+      if (label && label.textContent !== text) label.textContent = text;
+    }
   }
   scope.render();
 }, (error) => {
@@ -187,14 +193,20 @@ function terminalLabel(part, pin) {
   return components[part.type].labels?.[pin] ?? (pin ? "오른쪽" : "왼쪽");
 }
 
+function capacitorCharge(part) {
+  const voltage = voltageBetween(transientReading, [part.id, 0], [part.id, 1]);
+  return voltage === undefined ? "" : "Q " + number(part.value * voltage, "µC");
+}
+
 function measurementText({ part, wire, pin = null }) {
   const running = simulation.isRunning();
   const reading = running ? transientReading : simulationError.hidden ? readDC() : null;
   const volts = (end) => reading?.volts.get(keyOf(end));
+  const basis = (end) => reading?.references.get(keyOf(end)) > 0 ? "임시 기준" : "접지 기준";
   let label, voltage, amps, direction;
   if (wire) {
     label = `배선 ${wire.id}`;
-    voltage = "접지 기준 전압 " + number(volts(wire.a), "V");
+    voltage = basis(wire.a) + " 전압 " + number(volts(wire.a), "V");
     amps = reading?.wireCurrents.get(wire.id);
     if (amps) {
       const [from, to] = amps > 0 ? [wire.a, wire.b] : [wire.b, wire.a];
@@ -211,11 +223,12 @@ function measurementText({ part, wire, pin = null }) {
     label = `${spec.name} ${part.id}`;
     amps = reading?.currents.get(part.id);
     if (pin !== null || pinCount(part) === 1) {
-      voltage = `${terminalName(pin ?? 0)} 전압 ${number(volts([part.id, pin ?? 0]), "V")}`;
+      const end = [part.id, pin ?? 0];
+      voltage = `${terminalName(end[1])} 전압 ${number(volts(end), "V")} · ${basis(end)}`;
     } else if (pinCount(part) === 2) {
-      const a = volts([part.id, 0]);
-      const b = volts([part.id, 1]);
-      voltage = "양단 전압 " + number(a === undefined || b === undefined ? undefined : a - b, "V");
+      voltage = "양단 전압 " + number(voltageBetween(reading, [part.id, 0], [part.id, 1]), "V");
+      const charge = spec.model === "capacitor" && capacitorCharge(part);
+      if (charge) voltage += "\n" + charge;
     } else {
       voltage = pinsFor(part).map((_, index) =>
         `${terminalName(index)} ${number(volts([part.id, index]), "V")}`).join("\n");
@@ -284,9 +297,7 @@ function partMarkup(part) {
   if (spec.shape) caption = `${spec.icon} ${part.value} V · ${part.frequency} Hz`;
   if (part.type === "ammeter" && result) caption = "전류계 · " + number(current === undefined ? undefined : current * 1000, "mA");
   if (part.type === "voltmeter" && result) {
-    const a = result.volts.get(keyOf([part.id, 0]));
-    const b = result.volts.get(keyOf([part.id, 1]));
-    caption = "전압계 · " + number(a === undefined || b === undefined ? undefined : a - b, "V");
+    caption = "전압계 · " + number(voltageBetween(result, [part.id, 0], [part.id, 1]), "V");
   }
   const terminals = Array.from({ length: pinCount(part) }, (_, pin) => {
     const [x, y] = pinPosition([part.id, pin]);
@@ -312,6 +323,7 @@ function partMarkup(part) {
       <rect class="part-box" x="-42" y="-29" width="84" height="58" rx="10"/>
       <path class="part-symbol" transform="rotate(${part.angle})" d="${spec.toggle && part.value ? spec.closed : spec.symbol}"/>
       ${switchControl ? "" : `<text class="part-caption" y="${captionY}"${channel >= 0 ? ` style="fill:${scopeColors[channel]}"` : ""}>${caption}</text>`}
+      ${spec.model === "capacitor" ? `<text class="part-caption capacitor-charge" data-charge="${part.id}" y="${captionY + 16}">${capacitorCharge(part)}</text>` : ""}
     </g>${terminals}${switchControl}</g>`;
 }
 
@@ -548,7 +560,7 @@ function syncSimulation() {
   const dynamic = parts.some(isTimeDependent);
   const hasScope = parts.some(({ type }) => type === "scope");
   byId("simulation-reset").hidden = !dynamic;
-  const connected = wires.length > 0 && parts.some(({ type }) => type === "ground");
+  const connected = wires.length > 0;
   simulation.configure(parts, wires, !byId("bench").hidden && connected && (dynamic || hasScope));
 }
 
@@ -561,8 +573,9 @@ function update() {
   result = live ? dcReading : null;
   byId("simulate").setAttribute("aria-pressed", String(live));
   solveStatus.hidden = !live;
-  solveStatus.textContent = !live ? "" : dcError || (result.floating ?
-    "— 표시는 접지 기준 전압을 계산할 수 없는 단자입니다." : "단자에 접지 기준 전압을 표시했습니다.");
+  solveStatus.textContent = !live ? "" : dcError || (Array.from(result.references.values()).some((group) => group > 0) ?
+    "접지에 연결되지 않은 회로는 각 회로의 임시 기준 전압을 표시합니다." :
+    result.floating ? "— 표시는 전압을 계산할 수 없는 단자입니다." : "단자에 접지 기준 전압을 표시했습니다.");
   byId("bench-share-box").hidden = true;
   simulationError.hidden = true;
   syncSimulation();

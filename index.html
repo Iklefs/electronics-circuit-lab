@@ -169,6 +169,7 @@
     <header class="board-bar">
       <div><p class="eyebrow">논리회로</p><strong id="logic-count">부품 0개 · 배선 0개</strong></div>
       <div class="board-actions"><button id="logic-delete" type="button" disabled>선택 삭제</button>
+        <button id="logic-scope-toggle" type="button" aria-controls="logic-scope-panel" aria-expanded="false">논리 오실로스코프</button>
         <button id="logic-chip-inspect" type="button" disabled>내부 회로 보기</button>
         <button id="logic-clear" type="button" disabled>모두 지우기</button>
         <button id="logic-cancel" type="button" hidden>취소</button>
@@ -201,6 +202,28 @@
         <span><i data-signal="1"></i>1 HIGH</span><span><i data-signal="0"></i>0 LOW</span><span><i data-signal="-1"></i>X 미정</span>
       </div>
     </div>
+  </section>
+  <section id="logic-scope-panel" class="card scope transient-scope" aria-labelledby="logic-scope-title" hidden>
+    <div class="scope-heading">
+      <h2 id="logic-scope-title">논리 오실로스코프</h2>
+      <div class="scope-actions">
+        <label for="logic-scope-window">시간창</label>
+        <select id="logic-scope-window">
+          <option value="1">1 s</option><option value="2" selected>2 s</option>
+          <option value="5">5 s</option><option value="10">10 s</option>
+        </select>
+        <button id="logic-scope-run" type="button" class="primary">Ⅱ 기록 일시정지</button>
+        <button id="logic-scope-reset" type="button">기록 지우기</button>
+      </div>
+    </div>
+    <div class="logic-scope-channels scope-actions">
+      <label>CH1 <select data-channel="1"></select></label>
+      <label>CH2 <select data-channel="2"></select></label>
+      <label>CH3 <select data-channel="3"></select></label>
+      <label>CH4 <select data-channel="4"></select></label>
+    </div>
+    <p id="logic-scope-status" class="scope-connection-tip"></p>
+    <svg id="logic-scope-plot" role="img" aria-label="같은 시간축에서 비교하는 논리 신호 파형"></svg>
   </section>
   <dialog id="logic-chip-dialog" class="chip-diagram-dialog" aria-labelledby="chip-diagram-title">
     <div class="chip-diagram-header">
