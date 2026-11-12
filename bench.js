@@ -39,6 +39,7 @@ const maxWires = 60;
 const maxPoints = 12;
 const rotationStep = 15;
 const historyLimit = 100;
+const minDisplayedChargeMicrocoulombs = 0.001;
 let parts = [];
 let wires = [];
 const undoStack = [];
@@ -195,7 +196,10 @@ function terminalLabel(part, pin) {
 
 function capacitorCharge(part) {
   const voltage = voltageBetween(transientReading, [part.id, 0], [part.id, 1]);
-  return voltage === undefined ? "" : "Q " + number(part.value * voltage, "µC");
+  if (voltage === undefined) return "";
+  const charge = part.value * voltage;
+  const displayedCharge = Math.abs(charge) < minDisplayedChargeMicrocoulombs ? 0 : charge;
+  return "Q " + number(displayedCharge, "µC");
 }
 
 function measurementText({ part, wire, pin = null }) {
