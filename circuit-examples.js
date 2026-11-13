@@ -18,12 +18,12 @@ function divider(second, value, angle, supply, first) {
   };
 }
 
-function waveComparison(source, series, seriesValue, resistance, frequency, amplitude) {
+function waveComparison(source, series, seriesValue, loadValue, frequency, amplitude, load = "resistor") {
   return {
     parts: [
       ["source", source, 115, 260, { angle: 90, value: amplitude, frequency }],
       ["series", series, 435, 115, { value: seriesValue }],
-      ["load", "resistor", 595, 260, { angle: 90, value: resistance }],
+      ["load", load, 595, 260, { angle: 90, value: loadValue }],
       ["in", "scope", 295, 260, { angle: 90 }],
       ["out", "scope", 775, 260, { angle: 90 }],
       ["gnd", "ground", 465, 420],
@@ -74,6 +74,20 @@ export const analogExamples = {
     name: "커패시터 · 교류 RC 필터",
     role: "저항과 커패시터를 연결하면 높은 주파수의 출력 진폭을 줄일 수 있습니다.",
     try: "교류 전원을 10 Hz에서 50 Hz로 바꾸고 오실로스코프에서 입력과 출력의 진폭을 비교하세요.",
+  },
+  fastRc: {
+    name: "빠른 RC · 100 µs 충전",
+    role: "100 Ω과 1 µF의 시정수는 100 µs입니다. 커패시터 전압은 구형파의 변화에 지수곡선으로 응답합니다.",
+    try: "CH1의 구형파가 바뀌는 순간과 CH2가 목표 전압으로 다가가는 구간을 비교하세요.",
+    scopeWindow: "0.01",
+    ...waveComparison("square", "resistor", 100, 1, 100, 5, "capacitor"),
+  },
+  lc: {
+    name: "LC · 감쇠 진동",
+    role: "10 mH 인덕터와 10 µF 커패시터 사이에서 에너지가 오가며 약 503 Hz로 진동합니다.",
+    try: "CH1의 구형파가 바뀔 때마다 CH2에서 진동이 시작됩니다. 인덕턴스를 높이면 주기가 길어집니다.",
+    scopeWindow: "0.05",
+    ...waveComparison("square", "inductor", 10, 10, 20, 2, "capacitor"),
   },
   led: {
     name: "저항 · LED 전류 제한",
@@ -136,6 +150,26 @@ export const analogExamples = {
     try: "CH1의 구형파와 둥글게 변하는 CH2를 비교하세요. 인덕턴스를 1,000 mH에서 100 mH로 줄이면 CH2가 더 빠르게 변합니다.",
     scopeWindow: "1",
     ...waveComparison("square", "inductor", 1000, 10, 2, 2),
+  },
+  motor: {
+    name: "DC 모터 · 기동과 역기전력",
+    role: "모터가 가속하면 역기전력이 커지고 권선 전류가 줄어듭니다. 전원을 끊으면 회전 관성으로 잠시 더 돕니다.",
+    try: "스위치를 닫고 회전 속도를 보세요. 모터 설정에서 부하 토크를 1 mN·m로 높인 뒤 전류와 속도를 비교하세요.",
+    parts: [
+      ["source", "source", 150, 255, { angle: 90 }],
+      ["switch", "switch", 345, 135],
+      ["motor", "motor", 555, 250, { angle: 90 }],
+      ["diode", "diode", 775, 250, { angle: 270 }],
+      ["gnd", "ground", 355, 415],
+    ],
+    wires: [
+      ["source", 0, "switch", 0, [[150, 135]]],
+      ["switch", 1, "motor", 0, [[555, 135]]],
+      ["motor", 0, "diode", 1],
+      ["motor", 1, "diode", 0],
+      ["source", 1, "gnd", 0, [[150, 389]]],
+      ["motor", 1, "gnd", 0, [[555, 389]]],
+    ],
   },
 };
 

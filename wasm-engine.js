@@ -1,4 +1,5 @@
 import wasmUrl from "./engine/engine.wasm?url";
+import { components, motorSettings } from "./components.js";
 
 const wasm = await (async () => {
   const response = await fetch(wasmUrl);
@@ -10,18 +11,19 @@ const wasm = await (async () => {
   return null;
 });
 
-// Shared ABI with engine/src/lib.rs. Each part has three pin slots and four input fields.
+// Shared ABI with engine/src/lib.rs.
 const pinStride = 3;
-const partStride = 4;
+const partStride = 10;
 const maxParts = 256;
 const maxWires = 512;
 const wireInput = maxParts * partStride;
 const voltOutput = wireInput + maxWires * 2;
 const currentOutput = voltOutput + maxParts * pinStride;
 const historyOutput = currentOutput + maxParts;
-const wireOutput = historyOutput + maxParts;
+const wireOutput = historyOutput + maxParts * 2;
 const referenceOutput = wireOutput + maxWires;
-const bufferSize = referenceOutput + maxParts * pinStride;
+const stepOutput = referenceOutput + maxParts * pinStride;
+const bufferSize = stepOutput + 2;
 let memory;
 
 const unavailable = "회로 계산 엔진을 불러올 수 없습니다. 페이지를 새로고침하세요.";
@@ -58,6 +60,7 @@ const errors = [
   "전원의 양단이 바로 연결됐거나 이상적인 전원이 서로 충돌합니다. 배선을 확인하세요.",
   "다이오드 회로를 계산하지 못했습니다. 전원과 직렬 저항을 확인하세요.",
   "부품과 배선 데이터를 확인하세요.",
+  "회로의 변화를 충분히 작은 시간 간격으로 계산하지 못했습니다. 부품 값과 연결을 확인하세요.",
 ];
 
 function check(status) {
@@ -69,7 +72,11 @@ const measured = (value) => Number.isFinite(value) ? value : undefined;
 export function solveAnalog(parts, wires, codeFor, pinCount, keyOf, transient) {
   let data = buffer();
   parts.forEach((part, index) => {
-    data.set([codeFor(part.type), part.value, part.frequency ?? 0, transient?.storage.get(part.id) ?? 0], index * partStride);
+    const state = transient?.storage.get(part.id);
+    const motor = part.type === "motor" ? Object.entries(motorSettings).map(([key, spec]) =>
+      (part.motor?.[key] ?? spec.initial) * spec.scale) : [];
+    data.set([codeFor(part.type), part.value, part.frequency ?? 0,
+      state?.electrical ?? 0, state?.speed ?? 0, ...motor], index * partStride);
   });
   sendWires(data, parts, wires);
   check(wasm.measure_analog(parts.length, wires.length, transient?.time ?? 0, transient?.step ?? 0));
@@ -77,6 +84,7 @@ export function solveAnalog(parts, wires, codeFor, pinCount, keyOf, transient) {
   const volts = new Map([["gnd", 0]]);
   const references = new Map();
   const currents = new Map();
+  const motors = new Map();
   let floating = false;
   parts.forEach((part, index) => {
     for (let pin = 0; pin < pinCount(part); pin++) {
@@ -88,11 +96,21 @@ export function solveAnalog(parts, wires, codeFor, pinCount, keyOf, transient) {
     }
     const current = measured(data[currentOutput + index]);
     if (current !== undefined) currents.set(part.id, current);
-    const history = measured(data[historyOutput + index]);
-    if (history !== undefined) transient?.storage.set(part.id, history);
+    const model = components[part.type].model;
+    if (model === "capacitor" || model === "inductor" || model === "motor") {
+      const offset = historyOutput + index * 2;
+      const state = { electrical: data[offset], speed: data[offset + 1] };
+      transient?.storage.set(part.id, state);
+      if (model === "motor") {
+        const { constant } = motorSettings;
+        const k = (part.motor?.constant ?? constant.initial) * constant.scale;
+        motors.set(part.id, { rpm: state.speed * 60 / (2 * Math.PI), backEmf: k * state.speed });
+      }
+    }
   });
   const wireCurrents = new Map(wires.map(({ id }, index) => [id, measured(data[wireOutput + index])]));
-  return { volts, references, currents, wireCurrents, floating };
+  return { volts, references, currents, wireCurrents, floating, motors,
+    elapsed: data[stepOutput], nextStep: data[stepOutput + 1] };
 }
 
 export function solveLogic(parts, wires, codeFor) {

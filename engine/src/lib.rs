@@ -1,19 +1,20 @@
 mod analog;
 mod logic;
 
-use analog::{Error, Part, PartKind, TimeStep, PIN_STRIDE};
+use analog::{Error, Motor, Part, PartKind, State, PIN_STRIDE};
 use logic::Gate;
 
 const MAX_PARTS: usize = 256;
 const MAX_WIRES: usize = 512;
-const PART_STRIDE: usize = 4;
+const PART_STRIDE: usize = 10;
 const WIRE_INPUT: usize = MAX_PARTS * PART_STRIDE;
 const VOLT_OUTPUT: usize = WIRE_INPUT + MAX_WIRES * 2;
 const CURRENT_OUTPUT: usize = VOLT_OUTPUT + MAX_PARTS * PIN_STRIDE;
 const HISTORY_OUTPUT: usize = CURRENT_OUTPUT + MAX_PARTS;
-const WIRE_OUTPUT: usize = HISTORY_OUTPUT + MAX_PARTS;
+const WIRE_OUTPUT: usize = HISTORY_OUTPUT + MAX_PARTS * 2;
 const REFERENCE_OUTPUT: usize = WIRE_OUTPUT + MAX_WIRES;
-const BUFFER_SIZE: usize = REFERENCE_OUTPUT + MAX_PARTS * PIN_STRIDE;
+const STEP_OUTPUT: usize = REFERENCE_OUTPUT + MAX_PARTS * PIN_STRIDE;
+const BUFFER_SIZE: usize = STEP_OUTPUT + 2;
 
 // The browser writes into this buffer and calls one synchronous export at a time.
 // The WASM module has no imports or threads, so these calls cannot re-enter.
@@ -79,12 +80,29 @@ pub extern "C" fn measure_analog(
                 PartKind::Spdt | PartKind::Pot => 3,
                 _ => 2,
             };
+            if kind == PartKind::Motor
+                && [row[1], row[5], row[6], row[7], row[8]]
+                    .iter()
+                    .any(|value| *value <= 0.0)
+            {
+                return None;
+            }
             row.iter().all(|value| value.is_finite()).then_some(Part {
                 kind,
                 pins,
                 value: row[1],
                 frequency: row[2],
-                history: row[3],
+                state: State {
+                    electrical: row[3],
+                    speed: row[4],
+                },
+                motor: Motor {
+                    inductance: row[5],
+                    inertia: row[6],
+                    constant: row[7],
+                    damping: row[8],
+                    load: row[9],
+                },
             })
         })
         .collect();
@@ -97,20 +115,31 @@ pub extern "C" fn measure_analog(
     let Some(wires) = parse_wires(buffer, wire_count, |a, b| pin_exists(a) && pin_exists(b)) else {
         return 5;
     };
-    let transient = (step > 0.0).then_some(TimeStep { time, step });
-    let reading = match analog::measure(&parts, &wires, transient) {
-        Ok(reading) => reading,
+    let result = if step > 0.0 {
+        analog::advance(&parts, &wires, time, step)
+    } else {
+        analog::measure(&parts, &wires, None).map(|reading| (reading, 0.0, 0.0))
+    };
+    let (reading, actual_step, next_step) = match result {
+        Ok(result) => result,
         Err(Error::OpenCurrentSource) => return 2,
         Err(Error::Singular) => return 3,
         Err(Error::NonConvergent) => return 4,
+        Err(Error::StepTooSmall) => return 6,
     };
     let pin_count = part_count * PIN_STRIDE;
     buffer[VOLT_OUTPUT..VOLT_OUTPUT + pin_count].copy_from_slice(&reading.volts[..pin_count]);
     buffer[CURRENT_OUTPUT..CURRENT_OUTPUT + part_count].copy_from_slice(&reading.currents);
-    buffer[HISTORY_OUTPUT..HISTORY_OUTPUT + part_count].copy_from_slice(&reading.history);
+    for (index, state) in reading.states.iter().enumerate() {
+        let offset = HISTORY_OUTPUT + index * 2;
+        buffer[offset] = state.electrical;
+        buffer[offset + 1] = state.speed;
+    }
     buffer[WIRE_OUTPUT..WIRE_OUTPUT + wire_count].copy_from_slice(&reading.wire_currents);
     buffer[REFERENCE_OUTPUT..REFERENCE_OUTPUT + pin_count]
         .copy_from_slice(&reading.reference_groups[..pin_count]);
+    buffer[STEP_OUTPUT] = actual_step;
+    buffer[STEP_OUTPUT + 1] = next_step;
     0
 }
 

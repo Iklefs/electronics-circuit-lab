@@ -77,6 +77,7 @@
       <div id="editor-frequency" hidden><label for="part-frequency">주파수 (Hz)</label>
         <input id="part-frequency" type="number" step="any" required disabled>
       </div>
+      <fieldset id="editor-motor" hidden disabled><legend>모터 설정</legend></fieldset>
       <button id="scope-jump" type="button" hidden>오실로스코프 열기</button>
       <button id="rotate-part" type="button">↻ 15° 회전</button>
       <button id="editor-delete" type="button">부품 삭제</button>
@@ -100,6 +101,8 @@
     <div class="scope-actions">
       <label for="scope-window">시간창</label>
       <select id="scope-window">
+        <option value="0.0001">100 µs</option>
+        <option value="0.001">1 ms</option>
         <option value="0.01">10 ms</option>
         <option value="0.05">50 ms</option>
         <option value="0.2">200 ms</option>

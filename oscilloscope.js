@@ -3,7 +3,7 @@ import { voltageBetween } from "./circuit.js";
 export const scopeColors = ["#72efd6", "#ffd18c", "#b6baff", "#fc9db6"];
 const byId = (id) => document.getElementById(id);
 const format = (value) => Number(value.toPrecision(4)).toString();
-const cursorTime = new Intl.NumberFormat("ko-KR", { maximumFractionDigits: 5, useGrouping: false });
+const cursorTime = new Intl.NumberFormat("ko-KR", { maximumFractionDigits: 7, useGrouping: false });
 const minVoltageRange = 0.01;
 const voltageForDisplay = (voltage) => Math.abs(voltage) < 1e-6 ? 0 : voltage;
 const formatVoltage = (voltage) => Number.isFinite(voltage) ? format(voltageForDisplay(voltage)) + " V" : "미측정";
@@ -98,14 +98,14 @@ export function createScope() {
   let samples = [];
   let time = 0;
   let recording = true;
-  let nextSample = 0;
+  let bucket = null;
 
   function draw() {
     const span = Number(windowInput.value);
     const start = Math.max(0, time - span);
-    const shown = samples.filter((sample) => sample.time >= start);
+    const shown = [...samples, ...bucketSamples()].filter((sample) => sample.time >= start);
     const voltages = shown.flatMap(({ values }) => channels.map(({ id }) => values[id]).filter(Number.isFinite));
-    const peak = Math.max(minVoltageRange, ...voltages.map(Math.abs));
+    const peak = voltages.reduce((peak, value) => Math.max(peak, Math.abs(value)), minVoltageRange);
     const step = 10 ** Math.floor(Math.log10(peak));
     const limit = Math.ceil(peak / step) * step;
     const low = voltages.some((value) => voltageForDisplay(value) < 0) ? -limit : 0;
@@ -118,7 +118,7 @@ export function createScope() {
       const t = start + index * span / 5;
       const v = low + index * (limit - low) / 5;
       grid.push(`<path d="M${x(t)} ${top}V${bottom}M${left} ${y(v)}H${right}" stroke="#3b516c"/>
-        <text x="${x(t)}" y="254" text-anchor="middle">${format(t)}</text>
+        <text x="${x(t)}" y="254" text-anchor="middle">${cursorTime.format(t)}</text>
         <text x="56" y="${y(v) + 4}" text-anchor="end">${format(v)}</text>`);
     }
     const traces = channels.map(({ id }, index) => {
@@ -152,13 +152,15 @@ export function createScope() {
 
   function clear() {
     samples = [];
-    time = nextSample = 0;
+    bucket = null;
+    time = 0;
     draw();
   }
 
   function sync(parts) {
     const wasEmpty = channels.length === 0;
     channels = parts.filter(({ type }) => type === "scope");
+    if (bucket) flushBucket();
     panel.hidden = channels.length === 0;
     if (wasEmpty && channels.length) {
       recording = true;
@@ -169,33 +171,57 @@ export function createScope() {
   }
 
   function sample(reading, timestamp) {
-    if (!recording || !channels.length || timestamp < nextSample) return;
+    if (!recording || !channels.length) return;
     const values = Object.fromEntries(channels.map(({ id }) =>
       [id, voltageBetween(reading, [id, 0], [id, 1])]));
     time = timestamp;
-    samples.push({ time, values });
-    nextSample = time + Number(windowInput.value) / 960;
+    const entry = { time, values };
+    const bin = Math.floor(time / (Number(windowInput.value) / 960));
+    if (bucket?.bin !== bin) {
+      flushBucket();
+      bucket = { bin, first: entry, last: entry, extrema: new Map() };
+    }
+    bucket.last = entry;
+    for (const { id } of channels) {
+      if (!Number.isFinite(values[id])) continue;
+      const range = bucket.extrema.get(id) ?? [entry, entry];
+      if (values[id] < range[0].values[id]) range[0] = entry;
+      if (values[id] > range[1].values[id]) range[1] = entry;
+      bucket.extrema.set(id, range);
+    }
+  }
+
+  function bucketSamples() {
+    if (!bucket) return [];
+    const entries = new Set([bucket.first, bucket.last]);
+    for (const range of bucket.extrema.values()) for (const entry of range) entries.add(entry);
+    return [...entries].sort((a, b) => a.time - b.time);
+  }
+
+  function flushBucket() {
+    samples.push(...bucketSamples());
+    bucket = null;
   }
 
   function render() {
     if (!recording || panel.hidden) return;
     const oldest = Math.max(0, time - Number(windowInput.value));
-    samples = samples.filter((entry) => entry.time >= oldest).slice(-1400);
+    samples = samples.filter((entry) => entry.time >= oldest);
     draw();
   }
 
   run.addEventListener("click", () => {
     recording = !recording;
+    flushBucket();
     if (recording) {
       // Show a break in the trace across the interval that was not recorded.
       if (samples.length) samples.push({ time, values: {}, gap: true });
-      nextSample = 0;
     }
     updateControls();
   });
   byId("scope-reset").addEventListener("click", clear);
   windowInput.addEventListener("change", () => {
-    nextSample = 0;
+    flushBucket();
     draw();
   });
   updateControls();

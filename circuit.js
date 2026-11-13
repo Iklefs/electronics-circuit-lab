@@ -18,7 +18,7 @@ export function voltageBetween(reading, a, b) {
 const codes = {
   ground: 0, switch: 1, spdt: 2, pot: 3, voltage: 4, current: 5, resistance: 6,
   ammeter: 7, capacitor: 8, inductor: 9, diode: 10, zener: 11, open: 12,
-  sine: 13, square: 14, triangle: 15,
+  sine: 13, square: 14, triangle: 15, motor: 16,
 };
 
 function codeFor(type) {

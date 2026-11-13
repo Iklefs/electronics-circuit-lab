@@ -154,6 +154,9 @@ button:disabled{cursor:default;opacity:.48}
 #editor-reading{display:none;white-space:pre-line;margin:0}
 .board-reading{position:absolute;z-index:3;pointer-events:none;white-space:pre-line;max-width:calc(100% - 16px);padding:.45rem .65rem;border:1px solid #6f95bc;border-radius:8px;background:#14243b;color:#e1f0ff;box-shadow:0 4px 14px #0006;font-size:.76rem;font-variant-numeric:tabular-nums}
 .part-editor input{width:100%;min-width:0;border:1px solid var(--line);border-radius:6px;padding:.3rem}
+#editor-motor{min-width:0;margin:0;padding:.35rem;border:1px solid var(--line);border-radius:6px}
+#editor-motor label{display:block;margin-bottom:.3rem}
+#editor-motor p{margin:0;font-size:.72rem}
 #editor-label{display:block;margin-bottom:.2rem}
 
 .ribbon-examples select,.scope-actions select{font-family:inherit;border:1px solid var(--line);border-radius:7px;color:inherit;background:white}

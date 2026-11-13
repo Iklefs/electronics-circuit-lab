@@ -5,6 +5,20 @@ const capacitor = "M-50 0h43m14 0h43 M-7-18v36m14-36v36";
 const diode = "M-50 0h38m24 0h38 M-12-16v32l24-16z M12-17v34";
 
 export const frequencyRange = { min: 0.1, max: 500, initial: 5 };
+export const motorSettings = {
+  inductance: { label: "권선 인덕턴스 (mH)", initial: 5, min: 0.001, max: 10000, scale: 1e-3 },
+  inertia: { label: "회전자·부하 관성 (g·cm²)", initial: 10, min: 0.01, max: 100000, scale: 1e-7 },
+  constant: { label: "토크 상수 (mN·m/A)", initial: 10, min: 0.01, max: 1000, scale: 1e-3 },
+  damping: { label: "회전 마찰·부하 계수 (µN·m·s/rad)", initial: 2, min: 0.01, max: 100000, scale: 1e-6 },
+  load: { label: "외부 부하 토크 (mN·m)", initial: 0, min: -1000, max: 1000, scale: 1e-3 },
+};
+
+export function validMotorSettings(settings) {
+  return settings === undefined || (settings !== null && typeof settings === "object" &&
+    Object.entries(motorSettings).every(([key, { min, max }]) =>
+      Number.isFinite(settings[key]) && settings[key] >= min && settings[key] <= max));
+}
+
 function generator(name, icon, shape, path) {
   return {
     name, icon, shape, group: 0, model: "voltage", value: 5, unit: "V", label: "최대 진폭",
@@ -54,9 +68,9 @@ export const components = {
     labels: ["공통", "A", "B"], symbol: "M-50 0h28l44-18h28 M22 18h28", closed: "M-50 0h28l44 18h28 M22-18h28" },
   lamp: { name: "램프", icon: "⊗", group: 4, model: "resistance", light: true, value: 100, unit: "Ω", label: "저항값", min: 1, max: 1000000,
     symbol: "M-50 0h29m42 0h29 M-13-13l26 26m0-26l-26 26 M21 0a21 21 0 1 1-42 0a21 21 0 1 1 42 0" },
-  motor: { name: "DC 모터", icon: "M", group: 4, model: "resistance", value: 10, unit: "Ω", label: "권선 저항", min: 1, max: 1000000,
+  motor: { name: "DC 모터", icon: "M", group: 4, model: "motor", value: 10, unit: "Ω", label: "권선 저항", min: 1, max: 1000000,
     symbol: leads + " M-12 11v-22l12 15 12-15v22 " + circle,
-    note: "정지한 모터의 권선을 저항으로 모델링합니다. 회전 속도와 역기전력은 계산하지 않습니다." },
+    note: "브러시 DC 모터의 평균 모델입니다. 권선 전류가 토크를 만들고, 회전 속도에 비례한 역기전력이 권선 전류에 다시 영향을 줍니다." },
   voltmeter: { name: "전압계", icon: "V", group: 4, model: "open", value: 0,
     labels: ["양극", "음극"], symbol: leads + " M-10-12l10 24 10-24 " + circle,
     note: "두 단자의 전압 차를 표시합니다. 이상적인 전압계로 전류는 0 A입니다." },

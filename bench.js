@@ -1,6 +1,6 @@
 import { createBoardCamera } from "./board-camera.js";
 import { analogExamples, bindExamplePicker, buildExample } from "./circuit-examples.js";
-import { components, frequencyRange, groups, pinsFor } from "./components.js";
+import { components, frequencyRange, groups, motorSettings, pinsFor, validMotorSettings } from "./components.js";
 import { pinCount, keyOf, measure, voltageBetween } from "./circuit.js";
 import { createScope, scopeColors } from "./oscilloscope.js";
 import { createSimulation, isTimeDependent } from "./simulation.js";
@@ -19,6 +19,13 @@ const readingTip = byId("board-reading");
 const editorReading = byId("editor-reading");
 const touchInput = matchMedia("(pointer: coarse)");
 const frequencyInput = byId("part-frequency");
+const motorEditor = byId("editor-motor");
+motorEditor.insertAdjacentHTML("beforeend", Object.entries(motorSettings).map(([key, { label, min, max }]) =>
+  `<label>${label}<input name="${key}" type="number" min="${min}" max="${max}" step="any" required></label>`
+).join("") + "<p>양의 부하 토크는 정방향 회전에 반대로 작용합니다.</p>");
+const motorInputs = [...motorEditor.querySelectorAll("input")];
+const cleanMotorSettings = (settings) => Object.fromEntries(
+  Object.keys(motorSettings).map((key) => [key, settings[key]]));
 const boardScroll = board.parentElement;
 const inspector = byId("inspector");
 const palette = byId("palette");
@@ -202,7 +209,7 @@ function measurementText({ part, wire, pin = null }) {
   const reading = !running && simulationError.hidden ? readDC() : boardReading();
   const volts = (end) => reading?.volts.get(keyOf(end));
   const basis = (end) => reading?.references.get(keyOf(end)) > 0 ? "임시 기준" : "접지 기준";
-  let label, voltage, amps, direction;
+  let label, voltage, amps, direction, motor;
   if (wire) {
     label = `배선 ${wire.id}`;
     voltage = basis(wire.a) + " 전압 " + number(volts(wire.a), "V");
@@ -233,10 +240,11 @@ function measurementText({ part, wire, pin = null }) {
         `${terminalName(index)} ${number(volts([part.id, index]), "V")}`).join("\n");
     }
     if (amps) direction = terminalName(0) + " → " + terminalName(1) + " 기준";
+    if (part.type === "motor") motor = motorReadout(part, reading);
   }
   const mode = running ? "실시간" : "DC";
   const current = number(amps === undefined ? undefined : amps * 1000, "mA");
-  return [label + " · " + mode, voltage, "전류 " + current, direction].filter(Boolean).join("\n");
+  return [label + " · " + mode, voltage, "전류 " + current, direction, motor].filter(Boolean).join("\n");
 }
 
 function refreshMeasurements() {
@@ -298,6 +306,14 @@ function meterCaption(part, reading) {
   return "전류계 · " + number(current === undefined ? undefined : current * 1000, "mA");
 }
 
+function motorReadout(part, reading) {
+  const state = reading?.motors.get(part.id);
+  if (!state) return "";
+  const { rpm, backEmf } = state;
+  return number(Math.abs(rpm) < 0.01 ? 0 : rpm, "rpm") +
+    " · 역기전력 " + number(Math.abs(backEmf) < 1e-6 ? 0 : backEmf, "V");
+}
+
 function setReadingText(element, text) {
   if (element && element.textContent !== text) element.textContent = text;
 }
@@ -322,6 +338,7 @@ function refreshBoardReadings(reading) {
     const spec = components[part.type];
     if (spec.light) item.classList.toggle("lit", lightOn(part, reading));
     if (spec.model === "capacitor") setReadingText(item.querySelector("[data-charge]"), capacitorCharge(part));
+    if (spec.model === "motor") setReadingText(item.querySelector("[data-motor-reading]"), motorReadout(part, reading));
     if (!live) continue;
     for (const label of item.querySelectorAll("[data-voltage-pin]")) {
       setReadingText(label, terminalVoltage(reading, part.id, Number(label.dataset.voltagePin)));
@@ -372,6 +389,7 @@ function partMarkup(part) {
       <path class="part-symbol" transform="rotate(${part.angle})" d="${spec.toggle && part.value ? spec.closed : spec.symbol}"/>
       ${switchControl ? "" : `<text class="part-caption" y="${captionY}"${channel >= 0 ? ` style="fill:${scopeColors[channel]}"` : ""}>${caption}</text>`}
       ${spec.model === "capacitor" ? `<text class="part-caption capacitor-charge" data-charge="${part.id}" y="${captionY + 16}">${capacitorCharge(part)}</text>` : ""}
+      ${spec.model === "motor" ? `<text class="part-caption capacitor-charge" data-motor-reading y="${captionY + 16}">${motorReadout(part, reading)}</text>` : ""}
     </g>${terminals}${switchControl}</g>`;
 }
 
@@ -513,6 +531,10 @@ function openEditor(part) {
     frequencyInput.max = frequencyRange.max;
     frequencyInput.value = part.frequency;
   }
+  motorEditor.hidden = motorEditor.disabled = part.type !== "motor";
+  if (!motorEditor.hidden) {
+    for (const input of motorInputs) input.value = part.motor?.[input.name] ?? motorSettings[input.name].initial;
+  }
   byId("scope-jump").hidden = part.type !== "scope";
   byId("rotate-part").hidden = false;
   byId("editor-delete").textContent = "부품 삭제";
@@ -528,6 +550,7 @@ function openWireEditor(wire, anchor) {
   byId("editor-title").textContent = `배선 ${wire.id}`;
   byId("editor-value").hidden = byId("editor-frequency").hidden = true;
   editorInput.disabled = frequencyInput.disabled = true;
+  motorEditor.hidden = motorEditor.disabled = true;
   byId("scope-jump").hidden = byId("rotate-part").hidden = true;
   byId("editor-delete").textContent = "배선 삭제";
   showEditor();
@@ -547,6 +570,11 @@ editor.addEventListener("submit", (event) => {
   if (!frequencyInput.disabled) {
     if (!Number.isFinite(frequencyInput.valueAsNumber)) return;
     editing.frequency = frequencyInput.valueAsNumber;
+  }
+  if (!motorEditor.disabled) {
+    const motor = Object.fromEntries(motorInputs.map((input) => [input.name, input.valueAsNumber]));
+    if (!validMotorSettings(motor)) return;
+    editing.motor = motor;
   }
   editing.value = editorInput.valueAsNumber;
   recordEdit();
@@ -619,8 +647,7 @@ function syncSimulation() {
   const dynamic = parts.some(isTimeDependent);
   const hasScope = parts.some(({ type }) => type === "scope");
   byId("simulation-reset").hidden = !dynamic;
-  const connected = wires.length > 0;
-  simulation.configure(parts, wires, !byId("bench").hidden && connected && (dynamic || hasScope));
+  simulation.configure(parts, wires, !byId("bench").hidden && (dynamic || (hasScope && wires.length > 0)));
 }
 
 function update() {
@@ -1119,12 +1146,13 @@ document.addEventListener("paste", (event) => {
     return;
   }
   if (!saved || !Object.hasOwn(components, saved.type)) return;
-  const { type, value, frequency, angle, x, y } = saved;
+  const { type, value, frequency, angle, x, y, motor } = saved;
   const spec = components[type];
   if (![x, y, value].every(Number.isFinite) || !Number.isInteger(angle) || angle < 0 || angle >= 360 ||
       value < (spec.min ?? 0) || value > (spec.max ?? (spec.toggle ? 1 : 0)) ||
       (spec.toggle && ![0, 1].includes(value)) ||
-      (spec.shape && (!Number.isFinite(frequency) || frequency < frequencyRange.min || frequency > frequencyRange.max))) return;
+      (spec.shape && (!Number.isFinite(frequency) || frequency < frequencyRange.min || frequency > frequencyRange.max)) ||
+      (type === "motor" && !validMotorSettings(motor))) return;
   event.preventDefault();
   if (!canPlace(type)) return;
   const right = camera.x + width / camera.zoom;
@@ -1135,6 +1163,7 @@ document.addEventListener("paste", (event) => {
     !parts.some((part) => Math.abs(part.x - a) < 85 && Math.abs(part.y - b) < 65)) ?? [(camera.x + right) / 2, (camera.y + bottom) / 2];
   const part = addPart(type, left, top);
   Object.assign(part, { value, angle, ...(spec.shape ? { frequency } : {}) });
+  if (type === "motor" && motor) part.motor = cleanMotorSettings(motor);
   recordEdit();
   closeEditor();
   selection = { kind: "part", id: part.id };
@@ -1181,7 +1210,7 @@ byId("simulation-reset").addEventListener("click", () => {
   simulation.reset();
   scope.clear();
   update();
-  status.textContent = "회로의 시간과 커패시터 전압, 인덕터 전류를 초기화했습니다.";
+  status.textContent = "시뮬레이션 시간과 부품에 저장된 에너지를 초기화했습니다.";
 });
 byId("simulate").addEventListener("click", () => {
   live = !live;
@@ -1347,6 +1376,10 @@ function route() {
         if (!Number.isFinite(part.frequency) || part.frequency < frequencyRange.min ||
             part.frequency > frequencyRange.max) throw new Error();
         clean.frequency = part.frequency;
+      }
+      if (part.type === "motor" && part.motor !== undefined) {
+        if (!validMotorSettings(part.motor)) throw new Error();
+        clean.motor = cleanMotorSettings(part.motor);
       }
       move(clean, part.x, part.y);
       loadedParts.set(clean.id, clean);

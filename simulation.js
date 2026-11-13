@@ -3,14 +3,15 @@ import { measure } from "./circuit.js";
 
 export function isTimeDependent(part) {
   const spec = components[part.type];
-  return Boolean(spec.shape) || spec.model === "capacitor" || spec.model === "inductor";
+  return Boolean(spec.shape) || ["capacitor", "inductor", "motor"].includes(spec.model);
 }
 
 export function createSimulation(onSample, onFrame, onError) {
   const storage = new Map();
   let parts = [];
   let wires = [];
-  let step = 1 / 1200;
+  let maxStep = 1 / 1200;
+  let nextStep = maxStep;
   let speed = 1;
   let time = 0;
   let budget = 0;
@@ -27,19 +28,23 @@ export function createSimulation(onSample, onFrame, onError) {
     stop();
     storage.clear();
     time = 0;
+    nextStep = maxStep;
   }
 
   function advance(now) {
-    budget += Math.min(0.05, (now - (lastFrame ?? now)) / 1000) * speed;
+    budget = Math.min(0.25, budget + Math.min(0.05, (now - (lastFrame ?? now)) / 1000) * speed);
     lastFrame = now;
     let reading;
     let count = 0;
     const deadline = performance.now() + 8;
     try {
-      while (budget >= step && count < 128 && (count === 0 || performance.now() < deadline)) {
-        reading = measure(parts, wires, { time: time + step, step, storage });
-        time += step;
-        budget -= step;
+      while (budget >= Math.min(nextStep, maxStep) && count < 1024 &&
+             (count === 0 || performance.now() < deadline)) {
+        const step = Math.min(nextStep, maxStep);
+        reading = measure(parts, wires, { time, step, storage });
+        time += reading.elapsed;
+        budget -= reading.elapsed;
+        nextStep = reading.nextStep;
         count += 1;
         onSample(reading, time);
       }
@@ -48,8 +53,6 @@ export function createSimulation(onSample, onFrame, onError) {
       onError(error);
       return;
     }
-    // Avoid accumulating work after a busy frame or while the tab is hidden.
-    if (count) budget = Math.min(budget, step);
     frameId = requestAnimationFrame(advance);
     if (reading) onFrame(reading);
   }
@@ -67,7 +70,8 @@ export function createSimulation(onSample, onFrame, onError) {
     }
     const frequency = Math.max(0, ...parts.filter(({ type }) => components[type].shape)
       .map((part) => part.frequency));
-    step = Math.min(1 / 1200, frequency ? 1 / (frequency * 48) : Infinity);
+    maxStep = Math.min(1 / 1200, frequency ? 1 / (frequency * 64) : Infinity);
+    nextStep = maxStep;
     if (frameId === null) frameId = requestAnimationFrame(advance);
   }
 
