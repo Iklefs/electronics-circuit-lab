@@ -60,7 +60,6 @@ let hovered = null;
 const clipboardPrefix = "circuit-lab:part:v1:";
 let drag = null;
 let live = false;
-let result = null;
 let flowMode = null;
 let dcReading = null;
 let dcError = "";
@@ -68,18 +67,9 @@ let transientReading = null;
 const scope = createScope();
 const simulation = createSimulation(scope.sample, (reading) => {
   transientReading = reading;
+  refreshBoardReadings(reading);
   refreshMeasurements();
   if (flowMode) refreshFlow();
-  for (const part of parts) {
-    const spec = components[part.type];
-    if (spec.light) {
-      partLayer.querySelector(`.part[data-part="${part.id}"]`)?.classList.toggle("lit", lightOn(part, reading));
-    } else if (spec.model === "capacitor") {
-      const label = partLayer.querySelector(`[data-charge="${part.id}"]`);
-      const text = capacitorCharge(part);
-      if (label && label.textContent !== text) label.textContent = text;
-    }
-  }
   scope.render();
 }, (error) => {
   transientReading = null;
@@ -185,6 +175,11 @@ function readDC() {
   return dcReading;
 }
 
+function boardReading() {
+  if (!simulationError.hidden) return null;
+  return simulation.isRunning() ? transientReading : dcReading;
+}
+
 function hideReadingTip() {
   hovered = null;
   readingTip.hidden = true;
@@ -204,7 +199,7 @@ function capacitorCharge(part) {
 
 function measurementText({ part, wire, pin = null }) {
   const running = simulation.isRunning();
-  const reading = running ? transientReading : simulationError.hidden ? readDC() : null;
+  const reading = !running && simulationError.hidden ? readDC() : boardReading();
   const volts = (end) => reading?.volts.get(keyOf(end));
   const basis = (end) => reading?.references.get(keyOf(end)) > 0 ? "임시 기준" : "접지 기준";
   let label, voltage, amps, direction;
@@ -289,28 +284,77 @@ function lightOn(part, reading) {
   return part.type === "led" ? current > 0.0001 : current ** 2 * part.value > 1e-6;
 }
 
+function terminalVoltage(reading, id, pin) {
+  const voltage = reading?.volts.get(keyOf([id, pin]));
+  return voltage === undefined ? "—" : number(voltage, "V");
+}
+
+function meterCaption(part, reading) {
+  if (!live) return components[part.type].name;
+  if (part.type === "voltmeter") {
+    return "전압계 · " + number(voltageBetween(reading, [part.id, 0], [part.id, 1]), "V");
+  }
+  const current = reading?.currents.get(part.id);
+  return "전류계 · " + number(current === undefined ? undefined : current * 1000, "mA");
+}
+
+function setReadingText(element, text) {
+  if (element && element.textContent !== text) element.textContent = text;
+}
+
+function refreshSolveStatus(reading) {
+  solveStatus.hidden = !live;
+  if (!live) return;
+  const running = simulation.isRunning();
+  const mode = running ? "실시간 측정" : "DC 정상상태";
+  const detail = !reading
+    ? (running ? "회로를 계산 중입니다." : dcError || "표시할 측정값이 없습니다.")
+    : [...reading.references.values()].some((group) => group > 0)
+      ? "접지에 연결되지 않은 회로는 각 회로의 임시 기준 전압을 표시합니다."
+      : reading.floating ? "— 표시는 전압을 계산할 수 없는 단자입니다." : "단자에 접지 기준 전압을 표시합니다.";
+  setReadingText(solveStatus, `${mode} · ${detail}`);
+}
+
+function refreshBoardReadings(reading) {
+  for (const [index, part] of parts.entries()) {
+    const item = partLayer.children[index];
+    if (!item) continue;
+    const spec = components[part.type];
+    if (spec.light) item.classList.toggle("lit", lightOn(part, reading));
+    if (spec.model === "capacitor") setReadingText(item.querySelector("[data-charge]"), capacitorCharge(part));
+    if (!live) continue;
+    for (const label of item.querySelectorAll("[data-voltage-pin]")) {
+      setReadingText(label, terminalVoltage(reading, part.id, Number(label.dataset.voltagePin)));
+    }
+    if (part.type === "ammeter" || part.type === "voltmeter") {
+      setReadingText(item.querySelector(".part-caption"), meterCaption(part, reading));
+    }
+  }
+  if (live) {
+    refreshSolveStatus(reading);
+    refreshInspectorCurrent(reading);
+  }
+}
+
 function partMarkup(part) {
   const spec = components[part.type];
   const selected = selection?.kind === "part" && selection.id === part.id;
-  const current = result?.currents.get(part.id);
-  const isLit = lightOn(part, transientReading ?? dcReading);
+  const reading = boardReading();
+  const isLit = lightOn(part, reading);
   let caption = spec.unit ? spec.name + " · " + part.value + " " + spec.unit : spec.name;
   if (part.type === "ground") caption = "GND";
   const channel = part.type === "scope" ? parts.filter(({ type }) => type === "scope").indexOf(part) : -1;
   if (channel >= 0) caption = `CH${channel + 1} · 오실로스코프`;
   if (spec.shape) caption = `${spec.icon} ${part.value} V · ${part.frequency} Hz`;
-  if (part.type === "ammeter" && result) caption = "전류계 · " + number(current === undefined ? undefined : current * 1000, "mA");
-  if (part.type === "voltmeter" && result) {
-    caption = "전압계 · " + number(voltageBetween(result, [part.id, 0], [part.id, 1]), "V");
-  }
+  const isMeter = part.type === "ammeter" || part.type === "voltmeter";
+  if (isMeter) caption = meterCaption(part, reading);
   const terminals = Array.from({ length: pinCount(part) }, (_, pin) => {
     const [x, y] = pinPosition([part.id, pin]);
     const key = keyOf([part.id, pin]);
     const active = pending && keyOf(pending) === key;
     const label = terminalLabel(part, pin);
-    const value = result?.volts.get(key);
     return `<circle class="terminal${active ? " pending" : ""}" data-terminal="${pin}" data-part="${part.id}" cx="${x - part.x}" cy="${y - part.y}" r="7" role="button" tabindex="0" aria-label="${spec.name} ${part.id} ${label} 단자"><title>점선 안에서 끌어 ${rotationStep}° 회전 · 밖으로 끌거나 눌러 배선 연결</title></circle>
-      ${result ? `<text class="voltage-label" x="${x - part.x}" y="${y - part.y - 12}">${value === undefined ? "—" : number(value, "V")}</text>` : ""}`;
+      ${live ? `<text class="voltage-label" data-voltage-pin="${pin}" x="${x - part.x}" y="${y - part.y - 12}">${terminalVoltage(reading, part.id, pin)}</text>` : ""}`;
   }).join("");
   const captionY = Math.abs(Math.sin(part.angle * Math.PI / 180)) > 0.35 && part.type !== "ground" ? 73 : 48;
   const toggleLabel = part.type === "spdt" ? (part.value ? "B 연결" : "A 연결") :
@@ -323,7 +367,7 @@ function partMarkup(part) {
       <text y="${captionY}">${toggleLabel}</text>
     </g>` : "";
   return `<g class="part${selected ? " selected" : ""}${isLit ? " lit" : ""}" data-part="${part.id}" transform="translate(${part.x} ${part.y})">
-    <g data-body="${part.id}" role="button" tabindex="0" aria-label="${caption} 선택">
+    <g data-body="${part.id}" role="button" tabindex="0" aria-label="${isMeter ? spec.name : caption} 선택">
       <rect class="part-box" x="-42" y="-29" width="84" height="58" rx="10"/>
       <path class="part-symbol" transform="rotate(${part.angle})" d="${spec.toggle && part.value ? spec.closed : spec.symbol}"/>
       ${switchControl ? "" : `<text class="part-caption" y="${captionY}"${channel >= 0 ? ` style="fill:${scopeColors[channel]}"` : ""}>${caption}</text>`}
@@ -360,7 +404,7 @@ function drawWires() {
 function refreshFlow() {
   if (!flowMode) return;
   const running = simulation.isRunning();
-  const reading = running ? transientReading : dcReading;
+  const reading = boardReading();
   const currents = reading?.wireCurrents;
   let moving = 0;
   let unknown = 0;
@@ -409,12 +453,22 @@ function drawInspector() {
   const part = selection?.kind === "part" && parts.find(({ id }) => id === selection.id);
   inspector.hidden = !part;
   if (!part) return;
-  const current = result?.currents.get(part.id);
   const spec = components[part.type];
   inspector.innerHTML = `<strong>${spec.name} · ${part.id}</strong>
     <span class="part-angle">회전 각도 ${part.angle}°</span>
-    ${current !== undefined ? `<span>전류 ${number(current * 1000, "mA")} · 회전 전 왼쪽 → 오른쪽 기준</span>` : ""}
+    ${live ? '<span id="inspector-current" hidden></span>' : ""}
     ${spec.note || spec.model === "diode" ? `<p class="bench-help">${spec.note ?? "문턱 전압과 도통 저항으로 근사한 DC 모델입니다."}</p>` : ""}`;
+  refreshInspectorCurrent(boardReading());
+}
+
+function refreshInspectorCurrent(reading) {
+  const label = byId("inspector-current");
+  if (!label || inspector.hidden) return;
+  const current = reading?.currents.get(selection.id);
+  label.hidden = current === undefined;
+  if (current !== undefined) {
+    setReadingText(label, `전류 ${number(current * 1000, "mA")} · 회전 전 왼쪽 → 오른쪽 기준`);
+  }
 }
 
 function positionEditor() {
@@ -556,6 +610,7 @@ function draw() {
   byId("empty-board").hidden = parts.length > 0 || Boolean(placing) || Boolean(paletteDrag?.moved);
   byId("clear-board").disabled = !parts.length;
   byId("example").disabled = parts.length > 0;
+  refreshSolveStatus(boardReading());
   drawInspector();
   positionEditor();
 }
@@ -573,16 +628,11 @@ function update() {
   dcError = "";
   transientReading = null;
   hideReadingTip();
-  if (live || flowMode || parts.some(({ type }) => components[type].light)) readDC();
-  result = live ? dcReading : null;
   byId("simulate").setAttribute("aria-pressed", String(live));
-  solveStatus.hidden = !live;
-  solveStatus.textContent = !live ? "" : dcError || (Array.from(result.references.values()).some((group) => group > 0) ?
-    "접지에 연결되지 않은 회로는 각 회로의 임시 기준 전압을 표시합니다." :
-    result.floating ? "— 표시는 전압을 계산할 수 없는 단자입니다." : "단자에 접지 기준 전압을 표시했습니다.");
   byId("bench-share-box").hidden = true;
   simulationError.hidden = true;
   syncSimulation();
+  if (!simulation.isRunning() && (live || flowMode || parts.some(({ type }) => components[type].light))) readDC();
   draw();
   scope.sync(parts);
   refreshMeasurements();
