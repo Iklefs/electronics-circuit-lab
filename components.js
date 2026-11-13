@@ -27,7 +27,8 @@ function generator(name, icon, shape, path) {
   };
 }
 
-export const groups = ["전원·접지", "수동소자", "반도체", "스위치", "출력·계측"];
+export const logicChipGroup = 5;
+export const groups = ["전원·접지", "수동소자", "반도체", "스위치", "출력·계측", "논리 칩"];
 export const components = {
   source: { name: "직류 전원", icon: "±", group: 0, model: "voltage", value: 5, unit: "V", label: "전압", min: 0, max: 24,
     labels: ["양극", "음극"], symbol: leads + " M-18 0h12m-6-6v12 M7 0h12 " + circle },
@@ -81,6 +82,20 @@ export const components = {
   ammeter: { name: "전류계", icon: "A", group: 4, model: "ammeter", value: 0,
     labels: ["양극", "음극"], symbol: leads + " M-12 12l12-24 12 24 M-7 3h14 " + circle,
     note: "회로에 직렬로 연결하세요. 내부 저항을 0.01 Ω으로 가정합니다." },
+  logicChip: { name: "논리 칩", icon: "▣", group: logicChipGroup, value: 0,
+    note: "VCC–GND에 2–6 V를 연결하세요. 입력은 전원의 30% 이하에서 0, 70% 이상에서 1로 읽습니다. X 출력은 고임피던스입니다." },
 };
 
-export const pinsFor = (part) => components[part.type].pins ?? [[-50, 0], [50, 0]];
+export function chipPackage(chip) {
+  const height = 54 + (Math.max(chip.inputs.length, chip.outputs.length) - 1) * 27;
+  const side = (count, x) => Array.from({ length: count }, (_, i) => [x, (i - (count - 1) / 2) * 27]);
+  return {
+    height,
+    pins: [[0, -height / 2 - 14], [0, height / 2 + 14],
+      ...side(chip.inputs.length, -86), ...side(chip.outputs.length, 86)],
+    labels: ["VCC", "GND", ...chip.inputs, ...chip.outputs.map(({ name }) => name)],
+  };
+}
+
+export const pinsFor = (part) => part.type === "logicChip" ? chipPackage(part.chip).pins :
+  components[part.type].pins ?? [[-50, 0], [50, 0]];

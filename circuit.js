@@ -1,5 +1,6 @@
 import { components, pinsFor } from "./components.js";
 import { solveAnalog } from "./wasm-engine.js";
+import { prepareMixedCircuit } from "./mixed-circuit.js";
 
 export const pinCount = (part) => pinsFor(part).length;
 export const keyOf = ([id, pin]) => id + ":" + pin;
@@ -26,6 +27,16 @@ function codeFor(type) {
   return codes[type] ?? codes[spec.shape ?? spec.model];
 }
 
-export function measure(parts, wires, transient = null) {
+function measureAnalog(parts, wires, transient) {
   return solveAnalog(parts, wires, codeFor, pinCount, keyOf, transient);
+}
+
+export function prepareCircuit(parts, wires) {
+  return parts.some(({ type }) => type === "logicChip")
+    ? prepareMixedCircuit(parts, wires, measureAnalog, voltageBetween, keyOf)
+    : (transient) => measureAnalog(parts, wires, transient);
+}
+
+export function measure(parts, wires, transient = null) {
+  return prepareCircuit(parts, wires)(transient);
 }

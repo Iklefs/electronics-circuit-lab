@@ -42,6 +42,32 @@ function waveComparison(source, series, seriesValue, loadValue, frequency, ampli
 }
 
 export const analogExamples = {
+  logicChip: {
+    name: "논리 칩 · AND로 LED 켜기",
+    role: "논리 칩의 두 입력이 모두 HIGH일 때 출력이 LED에 전류를 공급합니다.",
+    try: "두 전환 스위치를 모두 A에 연결하면 LED가 켜집니다. B는 GND, A는 5 V입니다.",
+    parts: [
+      ["source", "source", 135, 270, { angle: 90 }],
+      ["a", "spdt", 345, 175, { angle: 180 }],
+      ["b", "spdt", 345, 310, { angle: 180, value: 1 }],
+      ["chip", "logicChip", 560, 245, { chip: { v: 1, name: "AND 칩", inputs: ["A", "B"],
+        outputs: [{ name: "Y", from: "and" }], gates: [{ id: "and", type: "and", inputs: ["A", "B"] }] } }],
+      ["resistor", "resistor", 755, 245, { value: 330 }],
+      ["led", "led", 850, 345, { angle: 90 }],
+      ["gnd", "ground", 555, 440],
+    ],
+    wires: [
+      ["source", 0, "a", 1, [[135, 193]]], ["source", 0, "b", 1, [[220, 220], [220, 328]]],
+      ["source", 0, "chip", 0, [[135, 90], [560, 90]]],
+      ["source", 1, "gnd", 0, [[135, 414]]],
+      ["a", 2, "gnd", 0, [[270, 157], [270, 414]]],
+      ["b", 2, "gnd", 0, [[285, 292], [285, 414]]],
+      ["a", 0, "chip", 2, [[433, 175], [433, 232]]],
+      ["b", 0, "chip", 3, [[446, 310], [446, 259]]],
+      ["chip", 1, "gnd", 0], ["chip", 4, "resistor", 0],
+      ["resistor", 1, "led", 0, [[850, 245]]], ["led", 1, "gnd", 0, [[850, 414]]],
+    ],
+  },
   lamp: {
     name: "스위치 · 램프 켜기",
     role: "스위치는 전류가 흐르는 경로를 열거나 닫습니다.",

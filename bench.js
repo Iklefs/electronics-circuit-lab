@@ -1,7 +1,9 @@
 import { createBoardCamera } from "./board-camera.js";
 import { analogExamples, bindExamplePicker, buildExample } from "./circuit-examples.js";
-import { components, frequencyRange, groups, motorSettings, pinsFor, validMotorSettings } from "./components.js";
+import { chipPackage, components, frequencyRange, groups, logicChipGroup, motorSettings, pinsFor, validMotorSettings } from "./components.js";
 import { pinCount, keyOf, measure, voltageBetween } from "./circuit.js";
+import { chipLibrary } from "./chip-library.js";
+import { validateChip } from "./logic-circuit.js";
 import { createScope, scopeColors } from "./oscilloscope.js";
 import { createSimulation, isTimeDependent } from "./simulation.js";
 
@@ -65,6 +67,10 @@ let editing = null;
 let editorAnchor = null;
 let hovered = null;
 const clipboardPrefix = "circuit-lab:part:v1:";
+const maxSharedLength = 150000;
+const escape = (value) => value.replace(/[&<>"]/g, (character) =>
+  ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[character]);
+const partName = (part) => part.chip?.name ?? components[part.type].name;
 let drag = null;
 let live = false;
 let flowMode = null;
@@ -114,11 +120,21 @@ paletteGroups.innerHTML = groups.map((group, index) =>
   `<button type="button" data-group="${index}" aria-pressed="${index === 0}">${group}</button>`
 ).join("");
 palette.innerHTML = groups.map((group, index) => {
-  const buttons = Object.entries(components).filter(([, part]) => part.group === index).map(([type, part]) =>
+  const buttons = Object.entries(components).filter(([type, part]) => type !== "logicChip" && part.group === index).map(([type, part]) =>
     `<button type="button" data-type="${type}" aria-pressed="false"><span class="part-icon" aria-hidden="true">${part.icon}</span>${part.name}</button>`
   ).join("");
   return `<div class="palette-group" data-group="${index}" role="group" aria-label="${group}"${index ? " hidden" : ""}>${buttons}</div>`;
 }).join("");
+
+function renderAnalogChipList() {
+  const group = palette.querySelector(`[data-group="${logicChipGroup}"]`);
+  const chips = [...chipLibrary].slice(-32).reverse();
+  group.innerHTML = chips.length
+    ? chips.map(([id, chip]) => `<button type="button" data-type="${id}" aria-pressed="${placing === id}"><span class="part-icon" aria-hidden="true">▣</span>${escape(chip.name)}</button>`).join("")
+    : '<p class="bench-help">논리 작업대의 ‘칩 / JSON’에서 회로를 칩으로 저장하세요. 예제 메뉴에서도 논리 칩을 시험할 수 있습니다.</p>';
+}
+window.addEventListener("logic-chips-change", renderAnalogChipList);
+renderAnalogChipList();
 
 paletteGroups.addEventListener("click", (event) => {
   const button = event.target.closest("button");
@@ -128,6 +144,10 @@ paletteGroups.addEventListener("click", (event) => {
     item.setAttribute("aria-pressed", String(item === button));
   }
   for (const items of palette.children) items.hidden = items.dataset.group !== group;
+});
+byId("logic-chip-to-bench").addEventListener("click", () => {
+  paletteGroups.querySelector(`[data-group="${logicChipGroup}"]`).click();
+  location.hash = "bench";
 });
 
 function syncFullscreen() {
@@ -193,6 +213,7 @@ function hideReadingTip() {
 }
 
 function terminalLabel(part, pin) {
+  if (part.type === "logicChip") return chipPackage(part.chip).labels[pin];
   return components[part.type].labels?.[pin] ?? (pin ? "오른쪽" : "왼쪽");
 }
 
@@ -218,7 +239,7 @@ function measurementText({ part, wire, pin = null }) {
       const [from, to] = amps > 0 ? [wire.a, wire.b] : [wire.b, wire.a];
       const terminalName = ([id, index]) => {
         const device = parts.find((item) => item.id === id);
-        return components[device.type].name + " " + id + " · " + terminalLabel(device, index);
+        return partName(device) + " " + id + " · " + terminalLabel(device, index);
       };
       direction = terminalName(from) + " → " + terminalName(to);
       amps = Math.abs(amps);
@@ -226,11 +247,13 @@ function measurementText({ part, wire, pin = null }) {
   } else {
     const spec = components[part.type];
     const terminalName = (index) => terminalLabel(part, index);
-    label = `${spec.name} ${part.id}`;
+    label = `${partName(part)} ${part.id}`;
     amps = reading?.currents.get(part.id);
     if (pin !== null || pinCount(part) === 1) {
       const end = [part.id, pin ?? 0];
       voltage = `${terminalName(end[1])} 전압 ${number(volts(end), "V")} · ${basis(end)}`;
+    } else if (part.type === "logicChip") {
+      voltage = chipReadout(part, reading);
     } else if (pinCount(part) === 2) {
       voltage = "양단 전압 " + number(voltageBetween(reading, [part.id, 0], [part.id, 1]), "V");
       const charge = spec.model === "capacitor" && capacitorCharge(part);
@@ -314,6 +337,16 @@ function motorReadout(part, reading) {
     " · 역기전력 " + number(Math.abs(backEmf) < 1e-6 ? 0 : backEmf, "V");
 }
 
+function chipReadout(part, reading) {
+  const chip = reading?.chips?.get(part.id);
+  if (!chip) return "계산 대기";
+  if (!chip.powered) return "전원 필요";
+  const level = (value) => value === -1 ? "X" : String(value);
+  const inputs = chip.inputs.map(level).join(" · ");
+  const outputs = chip.outputs.map(level).join(" · ");
+  return inputs ? inputs + " → " + outputs : outputs;
+}
+
 function setReadingText(element, text) {
   if (element && element.textContent !== text) element.textContent = text;
 }
@@ -339,6 +372,7 @@ function refreshBoardReadings(reading) {
     if (spec.light) item.classList.toggle("lit", lightOn(part, reading));
     if (spec.model === "capacitor") setReadingText(item.querySelector("[data-charge]"), capacitorCharge(part));
     if (spec.model === "motor") setReadingText(item.querySelector("[data-motor-reading]"), motorReadout(part, reading));
+    if (part.type === "logicChip") setReadingText(item.querySelector("[data-chip-reading]"), chipReadout(part, reading));
     if (!live) continue;
     for (const label of item.querySelectorAll("[data-voltage-pin]")) {
       setReadingText(label, terminalVoltage(reading, part.id, Number(label.dataset.voltagePin)));
@@ -355,10 +389,11 @@ function refreshBoardReadings(reading) {
 
 function partMarkup(part) {
   const spec = components[part.type];
+  const chip = part.chip && chipPackage(part.chip);
   const selected = selection?.kind === "part" && selection.id === part.id;
   const reading = boardReading();
   const isLit = lightOn(part, reading);
-  let caption = spec.unit ? spec.name + " · " + part.value + " " + spec.unit : spec.name;
+  let caption = chip ? partName(part) : spec.unit ? spec.name + " · " + part.value + " " + spec.unit : spec.name;
   if (part.type === "ground") caption = "GND";
   const channel = part.type === "scope" ? parts.filter(({ type }) => type === "scope").indexOf(part) : -1;
   if (channel >= 0) caption = `CH${channel + 1} · 오실로스코프`;
@@ -370,9 +405,26 @@ function partMarkup(part) {
     const key = keyOf([part.id, pin]);
     const active = pending && keyOf(pending) === key;
     const label = terminalLabel(part, pin);
-    return `<circle class="terminal${active ? " pending" : ""}" data-terminal="${pin}" data-part="${part.id}" cx="${x - part.x}" cy="${y - part.y}" r="7" role="button" tabindex="0" aria-label="${spec.name} ${part.id} ${label} 단자"><title>점선 안에서 끌어 ${rotationStep}° 회전 · 밖으로 끌거나 눌러 배선 연결</title></circle>
+    return `<circle class="terminal${active ? " pending" : ""}" data-terminal="${pin}" data-part="${part.id}" cx="${x - part.x}" cy="${y - part.y}" r="7" role="button" tabindex="0" aria-label="${escape(partName(part))} ${part.id} ${escape(label)} 단자"><title>${escape(label)} · 점선 안에서 끌어 ${rotationStep}° 회전 · 밖으로 끌거나 눌러 배선 연결</title></circle>
       ${live ? `<text class="voltage-label" data-voltage-pin="${pin}" x="${x - part.x}" y="${y - part.y - 12}">${terminalVoltage(reading, part.id, pin)}</text>` : ""}`;
   }).join("");
+  if (chip) {
+    const verticalExtent = Math.max(...pinsFor(part).map(([x, y]) =>
+      Math.abs(x * Math.sin(part.angle * Math.PI / 180) + y * Math.cos(part.angle * Math.PI / 180))));
+    const short = (value, length) => escape(value.length > length ? value.slice(0, length - 1) + "…" : value);
+    const labels = chip.pins.map(([x, y], index) => {
+      const left = x < 0;
+      const lx = x === 0 ? 0 : left ? -66 : 66;
+      return `<text class="analog-chip-pin" x="${lx}" y="${y + (index === 0 ? 28 : index === 1 ? -20 : 4)}" text-anchor="${x === 0 ? "middle" : left ? "start" : "end"}">${short(chip.labels[index], 8)}</text>`;
+    }).join("");
+    const readout = chipReadout(part, reading);
+    return `<g class="part${selected ? " selected" : ""}" data-part="${part.id}" transform="translate(${part.x} ${part.y})">
+      <g data-body="${part.id}" role="button" tabindex="0" aria-label="${escape(caption)} 선택">
+        <g transform="rotate(${part.angle})"><rect class="part-box" x="-72" y="${-chip.height / 2}" width="144" height="${chip.height}" rx="9"/>${labels}</g>
+        <text class="part-caption" y="${verticalExtent + 20}">${short(caption, 26)}</text>
+        <text class="part-caption capacitor-charge" y="${verticalExtent + 36}" data-chip-reading>${escape(readout)}</text>
+      </g>${terminals}</g>`;
+  }
   const captionY = Math.abs(Math.sin(part.angle * Math.PI / 180)) > 0.35 && part.type !== "ground" ? 73 : 48;
   const toggleLabel = part.type === "spdt" ? (part.value ? "B 연결" : "A 연결") :
     part.value ? "닫힘 · ON" : "열림 · OFF";
@@ -472,7 +524,7 @@ function drawInspector() {
   inspector.hidden = !part;
   if (!part) return;
   const spec = components[part.type];
-  inspector.innerHTML = `<strong>${spec.name} · ${part.id}</strong>
+  inspector.innerHTML = `<strong>${escape(partName(part))} · ${part.id}</strong>
     <span class="part-angle">회전 각도 ${part.angle}°</span>
     ${live ? '<span id="inspector-current" hidden></span>' : ""}
     ${spec.note || spec.model === "diode" ? `<p class="bench-help">${spec.note ?? "문턱 전압과 도통 저항으로 근사한 DC 모델입니다."}</p>` : ""}`;
@@ -515,7 +567,7 @@ function showEditor() {
 function openEditor(part) {
   const spec = components[part.type];
   editing = part;
-  byId("editor-title").textContent = spec.name;
+  byId("editor-title").textContent = partName(part);
   byId("editor-value").hidden = !spec.unit;
   editorInput.disabled = !spec.unit;
   if (spec.unit) {
@@ -659,7 +711,8 @@ function update() {
   byId("bench-share-box").hidden = true;
   simulationError.hidden = true;
   syncSimulation();
-  if (!simulation.isRunning() && (live || flowMode || parts.some(({ type }) => components[type].light))) readDC();
+  if (!simulation.isRunning() && (live || flowMode ||
+      parts.some(({ type }) => type === "logicChip" || components[type].light))) readDC();
   draw();
   scope.sync(parts);
   refreshMeasurements();
@@ -681,12 +734,19 @@ byId("simulation-speed").addEventListener("change", (event) => {
 });
 
 function move(part, x, y) {
-  part.x = Math.max(60, Math.min(width - 60, Math.round(x / 10) * 10));
-  part.y = Math.max(60, Math.min(height - 80, Math.round(y / 10) * 10));
+  const chipPins = part.chip ? pinsFor(part) : [];
+  const angle = (part.angle ?? 0) * Math.PI / 180;
+  const side = Math.max(60, ...chipPins.map(([x, y]) => Math.abs(x * Math.cos(angle) - y * Math.sin(angle)) + 10));
+  const top = Math.max(60, ...chipPins.map(([x, y]) => Math.abs(x * Math.sin(angle) + y * Math.cos(angle)) + 22));
+  part.x = Math.max(side, Math.min(width - side, Math.round(x / 10) * 10));
+  const bottom = Math.max(80, part.chip ? top + 28 : 80);
+  part.y = Math.max(top, Math.min(height - bottom, Math.round(y / 10) * 10));
 }
 
-function addPart(type, x, y) {
+function addPart(type, x, y, chip = chipLibrary.get(type)) {
+  if (chip) type = "logicChip";
   const part = { id: nextId++, type, x, y, angle: 0, value: components[type].value };
+  if (chip) part.chip = chip;
   if (components[type].shape) part.frequency = frequencyRange.initial;
   move(part, x, y);
   parts.push(part);
@@ -712,7 +772,8 @@ function place(x, y) {
   selection = { kind: "part", id: part.id };
   placing = null;
   update();
-  status.textContent = `${components[part.type].name} 배치 완료. 단자를 눌러 연결하세요.`;
+  status.textContent = part.chip ? "VCC와 GND에 전원을 연결하고 입력·출력 핀을 배선하세요." :
+    `${partName(part)} 배치 완료. 단자를 눌러 연결하세요.`;
 }
 
 function sameWire(wire, a, b) {
@@ -806,9 +867,10 @@ palette.addEventListener("pointermove", (event) => {
     suppressPaletteClick = true;
     closeEditor();
     placing = pending = null;
-    const spec = components[paletteDrag.type];
+    const chip = chipLibrary.get(paletteDrag.type);
+    const spec = chip ? components.logicChip : components[paletteDrag.type];
     placementPreview.innerHTML = `<rect x="-42" y="-29" width="84" height="58" rx="10"/>
-      <path d="${spec.symbol}"/><text y="49">${spec.name}</text>`;
+      <path d="${spec.symbol ?? ""}"/><text y="49">${escape(chip?.name ?? spec.name)}</text>`;
     workbench.classList.add("placing-by-drag");
     status.textContent = "회로도 안에서 놓으면 부품이 추가됩니다.";
     draw();
@@ -816,7 +878,7 @@ palette.addEventListener("pointermove", (event) => {
   const position = dropPoint(event);
   placementPreview.toggleAttribute("hidden", !position);
   if (position) {
-    const preview = {};
+    const preview = { type: "logicChip", chip: chipLibrary.get(paletteDrag.type) };
     move(preview, position.x, position.y);
     placementPreview.setAttribute("transform", `translate(${preview.x} ${preview.y})`);
   }
@@ -1131,14 +1193,14 @@ for (const action of ["copy", "cut"]) {
     event.clipboardData.setData("text/plain", clipboardPrefix + JSON.stringify(part));
     event.preventDefault();
     if (action === "cut") deleteSelection();
-    status.textContent = `${components[part.type].name} ${action === "cut" ? "잘라내기" : "복사"} 완료.`;
+    status.textContent = `${partName(part)} ${action === "cut" ? "잘라내기" : "복사"} 완료.`;
   });
 }
 
 document.addEventListener("paste", (event) => {
   if (!canUseClipboard(event)) return;
   const text = event.clipboardData.getData("text/plain");
-  if (!text.startsWith(clipboardPrefix) || text.length > 500) return;
+  if (!text.startsWith(clipboardPrefix) || text.length > maxSharedLength) return;
   let saved;
   try {
     saved = JSON.parse(text.slice(clipboardPrefix.length));
@@ -1147,6 +1209,10 @@ document.addEventListener("paste", (event) => {
   }
   if (!saved || !Object.hasOwn(components, saved.type)) return;
   const { type, value, frequency, angle, x, y, motor } = saved;
+  let chip;
+  if (type === "logicChip") {
+    try { chip = validateChip(saved.chip); } catch { return; }
+  }
   const spec = components[type];
   if (![x, y, value].every(Number.isFinite) || !Number.isInteger(angle) || angle < 0 || angle >= 360 ||
       value < (spec.min ?? 0) || value > (spec.max ?? (spec.toggle ? 1 : 0)) ||
@@ -1161,8 +1227,9 @@ document.addEventListener("paste", (event) => {
   const [left, top] = candidates.find(([a, b]) => a > camera.x + 40 && a < right - 40 &&
     b > camera.y + 30 && b < bottom - 30 && a >= 60 && a <= width - 60 && b >= 60 && b <= height - 80 &&
     !parts.some((part) => Math.abs(part.x - a) < 85 && Math.abs(part.y - b) < 65)) ?? [(camera.x + right) / 2, (camera.y + bottom) / 2];
-  const part = addPart(type, left, top);
+  const part = addPart(type, left, top, chip);
   Object.assign(part, { value, angle, ...(spec.shape ? { frequency } : {}) });
+  if (chip) move(part, left, top);
   if (type === "motor" && motor) part.motor = cleanMotorSettings(motor);
   recordEdit();
   closeEditor();
@@ -1172,7 +1239,7 @@ document.addEventListener("paste", (event) => {
   update();
   openEditor(part);
   board.querySelector(`[data-body="${part.id}"]`)?.focus({ preventScroll: true });
-  status.textContent = `${spec.name} 붙여넣기 완료.`;
+  status.textContent = `${partName(part)} 붙여넣기 완료.`;
 });
 
 function deleteSelection() {
@@ -1269,7 +1336,7 @@ byId("example").addEventListener("click", () => {
   const kind = examplePicker.value;
   const example = analogExamples[kind];
   if (example.parts) {
-    buildExample(example, (type, x, y, options) => Object.assign(addPart(type, x, y), options),
+    buildExample(example, (type, x, y, options) => Object.assign(addPart(type, x, y, options?.chip), options),
       (a, b, points) => wires.push({ id: nextId++, a, b, ...(points ? { points } : {}) }));
     recordEdit();
     selection = pending = placing = null;
@@ -1308,6 +1375,10 @@ byId("example").addEventListener("click", () => {
 byId("bench-share").addEventListener("click", () => {
   const url = new URL(location.href);
   url.hash = "bench=" + encodeURIComponent(JSON.stringify({ v: 1, parts, wires }));
+  if (url.hash.length > maxSharedLength) {
+    status.textContent = "공유 링크가 너무 깁니다. 부품이나 칩 수를 줄여 주세요.";
+    return;
+  }
   const field = byId("bench-link");
   field.value = url.href;
   byId("bench-share-box").hidden = false;
@@ -1352,7 +1423,7 @@ function route() {
   }
   loadedHash = hash;
   try {
-    if (hash.length > 48000) throw new Error();
+    if (hash.length > maxSharedLength) throw new Error();
     const saved = JSON.parse(decodeURIComponent(hash.slice(7)));
     if (saved.v !== 1 || !Array.isArray(saved.parts) || !Array.isArray(saved.wires) ||
         saved.parts.length > maxParts || saved.wires.length > maxWires) throw new Error();
@@ -1372,6 +1443,7 @@ function route() {
           (!Number.isInteger(part.angle) || part.angle < 0 || part.angle >= 360) ||
           !Number.isFinite(part.x) || !Number.isFinite(part.y)) throw new Error();
       const clean = { id: part.id, type: part.type, value: part.value, angle: part.angle };
+      if (part.type === "logicChip") clean.chip = validateChip(part.chip);
       if (spec.shape) {
         if (!Number.isFinite(part.frequency) || part.frequency < frequencyRange.min ||
             part.frequency > frequencyRange.max) throw new Error();

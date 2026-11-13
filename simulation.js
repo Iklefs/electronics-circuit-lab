@@ -1,5 +1,5 @@
 import { components } from "./components.js";
-import { measure } from "./circuit.js";
+import { prepareCircuit } from "./circuit.js";
 
 export function isTimeDependent(part) {
   const spec = components[part.type];
@@ -8,8 +8,7 @@ export function isTimeDependent(part) {
 
 export function createSimulation(onSample, onFrame, onError) {
   const storage = new Map();
-  let parts = [];
-  let wires = [];
+  let measure;
   let maxStep = 1 / 1200;
   let nextStep = maxStep;
   let speed = 1;
@@ -41,7 +40,7 @@ export function createSimulation(onSample, onFrame, onError) {
       while (budget >= Math.min(nextStep, maxStep) && count < 1024 &&
              (count === 0 || performance.now() < deadline)) {
         const step = Math.min(nextStep, maxStep);
-        reading = measure(parts, wires, { time, step, storage });
+        reading = measure({ time, step, storage });
         time += reading.elapsed;
         budget -= reading.elapsed;
         nextStep = reading.nextStep;
@@ -57,9 +56,7 @@ export function createSimulation(onSample, onFrame, onError) {
     if (reading) onFrame(reading);
   }
 
-  function configure(nextParts, nextWires, active) {
-    parts = nextParts;
-    wires = nextWires;
+  function configure(parts, wires, active) {
     const storedIds = new Set(parts.filter(isTimeDependent).map(({ id }) => id));
     for (const id of storage.keys()) {
       if (!storedIds.has(id)) storage.delete(id);
@@ -68,6 +65,9 @@ export function createSimulation(onSample, onFrame, onError) {
       stop();
       return;
     }
+    // Prepare lazily so an oversized circuit reports through the normal error path.
+    let prepared;
+    measure = (transient) => (prepared ??= prepareCircuit(parts, wires))(transient);
     const frequency = Math.max(0, ...parts.filter(({ type }) => components[type].shape)
       .map((part) => part.frequency));
     maxStep = Math.min(1 / 1200, frequency ? 1 / (frequency * 64) : Infinity);

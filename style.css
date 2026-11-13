@@ -119,6 +119,7 @@ button:disabled{cursor:default;opacity:.48}
 .part.lit .part-symbol{stroke:#fff0ac}
 .part-caption{fill:#d5e5ff;font-size:13px;font-weight:700;text-anchor:middle;pointer-events:none}
 .part-caption.capacitor-charge{fill:#93e6d5;font-size:12px;font-variant-numeric:tabular-nums}
+.analog-chip-pin{fill:#d5e5ff;font-size:11px;pointer-events:none}
 .terminal{fill:#182d49;stroke:#9cbaff;stroke-width:2.5;cursor:crosshair;touch-action:none;outline:none}
 .terminal:hover,.terminal:focus-visible,.terminal.pending{fill:#ffe08c;stroke:#fff2c5}
 .voltage-label{fill:#a5f5dd;font-size:12px;font-weight:750;text-anchor:middle;pointer-events:none;paint-order:stroke;stroke:#14243b;stroke-width:4}

@@ -1,4 +1,5 @@
 import { solveLogic } from "./wasm-engine.js";
+import { chipId, chipLibrary as chips, saveChipLibrary } from "./chip-library.js";
 import { createBoardCamera } from "./board-camera.js";
 import { chipPinY, chipPreview } from "./logic-chip-preview.js";
 import { fullChipDiagram } from "./logic-chip-diagram.js";
@@ -20,7 +21,6 @@ const status = byId("logic-status");
 const share = byId("logic-share-panel");
 const link = byId("logic-link");
 const width = 960, height = 480;
-const chips = new Map();
 const chipList = byId("logic-chip-list");
 const chipJson = byId("logic-chip-json");
 const chipName = byId("logic-chip-name");
@@ -37,8 +37,6 @@ const pulseFrequency = byId("logic-pulse-frequency");
 const pulseDuty = byId("logic-pulse-duty");
 const pulseDefaults = { frequency: 1, duty: 50, running: true, value: 1 };
 const pulseStarts = new Map();
-const chipStorageKey = "circuit-lab.logic-chips.v1";
-const chipId = /^chip-[a-z0-9-]{1,50}$/;
 const maxJsonLength = 60000;
 const maxSharedLength = 150000;
 const instructions = "출력과 입력 단자를 차례로 누르면 연결됩니다. 스위치의 0 또는 1을 눌러 신호를 바꾸세요.";
@@ -652,26 +650,7 @@ function renderChipList() {
   }));
   chipList.hidden = !chipList.childElementCount;
 }
-
-function saveChipLibrary() {
-  try {
-    localStorage.setItem(chipStorageKey, JSON.stringify([...chips].slice(-32)));
-  } catch {
-    // Imported definitions still remain available in this tab and in shared links.
-  }
-}
-
-function loadChipLibrary() {
-  try {
-    const saved = JSON.parse(localStorage.getItem(chipStorageKey));
-    if (!Array.isArray(saved)) return;
-    for (const [id, chip] of saved.slice(-32)) {
-      if (typeof id === "string" && chipId.test(id)) chips.set(id, validateChip(chip));
-    }
-  } catch {
-    // Storage may be disabled or an older saved entry may be invalid.
-  }
-}
+window.addEventListener("logic-chips-change", renderChipList);
 
 function registerChip(chip, preferredId) {
   const definition = JSON.stringify(chip);
@@ -685,9 +664,8 @@ function registerChip(chip, preferredId) {
 function showChip(chip) {
   registerChip(chip);
   saveChipLibrary();
-  renderChipList();
   chipJson.value = JSON.stringify(chip, null, 2);
-  chipStatus.textContent = `${chip.name} 칩을 저장했습니다. 부품 목록에서 선택해 배치하세요.`;
+  chipStatus.textContent = `${chip.name} 칩을 저장했습니다. 두 작업대의 부품 목록에서 배치할 수 있습니다.`;
 }
 
 const chipPanel = byId("logic-chip-panel");
@@ -840,7 +818,6 @@ function restore() {
     parts = next;
     wires = nextWires;
     if (replacements.size) {
-      renderChipList();
       saveChipLibrary();
     }
     nextId = Math.max(0, ...ids) + 1;
@@ -856,7 +833,6 @@ window.addEventListener("hashchange", () => {
   if (workspace.hidden) logicScope.breakRecording();
   syncPulseAnimation();
 });
-loadChipLibrary();
 renderChipList();
 update();
 restore();
