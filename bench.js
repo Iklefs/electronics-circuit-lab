@@ -2,7 +2,8 @@ import { createBoardCamera } from "./board-camera.js";
 import { bindPanMode, createBoxSelection, isSelected, moveTogether, selectedIds,
   selectionMessage, toggleSelection } from "./board-selection.js";
 import { analogExamples, bindExamplePicker, buildExample } from "./circuit-examples.js";
-import { chipPackage, components, frequencyRange, groups, logicChipGroup, motorSettings, pinsFor, validMotorSettings } from "./components.js";
+import { chipPackage, components, frequencyRange, groups, logicChipGroup, motorSettings, pinsFor,
+  validMotorSettings, validNumericValue } from "./components.js";
 import { pinCount, keyOf, measure, voltageBetween } from "./circuit.js";
 import { chipLibrary } from "./chip-library.js";
 import { validateChip } from "./logic-circuit.js";
@@ -21,14 +22,14 @@ const rotationGuide = byId("rotation-guide");
 const draftPoints = byId("draft-points");
 const editor = byId("part-editor");
 const editorInput = byId("part-value");
-const voltageHint = byId("editor-voltage-hint");
+const valueHint = byId("editor-value-hint");
 const readingTip = byId("board-reading");
 const editorReading = byId("editor-reading");
 const touchInput = matchMedia("(pointer: coarse)");
 const frequencyInput = byId("part-frequency");
 const motorEditor = byId("editor-motor");
-motorEditor.insertAdjacentHTML("beforeend", Object.entries(motorSettings).map(([key, { label, min, max }]) =>
-  `<label>${label}<input name="${key}" type="number" min="${min}" max="${max}" step="any" required></label>`
+motorEditor.insertAdjacentHTML("beforeend", Object.entries(motorSettings).map(([key, { label, positive }]) =>
+  `<label>${label}<input name="${key}" type="number"${positive ? ' min="0"' : ""} step="any" required></label>`
 ).join("") + "<p>양의 부하 토크는 정방향 회전에 반대로 작용합니다.</p>");
 const motorInputs = [...motorEditor.querySelectorAll("input")];
 const cleanMotorSettings = (settings) => Object.fromEntries(
@@ -595,8 +596,7 @@ function showEditor() {
 
 function validPartValue(spec, value) {
   if (spec.toggle) return value === 0 || value === 1;
-  const max = spec.max ?? (spec.unit ? Infinity : 0);
-  return Number.isFinite(value) && value >= (spec.min ?? 0) && value <= max;
+  return spec.unit ? validNumericValue(spec, value) : value === 0;
 }
 
 function openEditor(part) {
@@ -607,14 +607,18 @@ function openEditor(part) {
   editorInput.disabled = !spec.unit;
   if (spec.unit) {
     byId("editor-label").textContent = `${spec.label} (${spec.unit})`;
-    editorInput.min = spec.min;
+    editorInput.min = spec.min ?? (spec.positive ? 0 : "");
     if (spec.max === undefined) editorInput.removeAttribute("max");
     else editorInput.max = spec.max;
     editorInput.value = part.value;
   }
-  voltageHint.hidden = spec.shape !== "sine";
-  if (voltageHint.hidden) editorInput.removeAttribute("aria-describedby");
-  else editorInput.setAttribute("aria-describedby", voltageHint.id);
+  const hint = spec.shape === "sine" ? "사인파의 실효값이 220 V이면 피크는 약 311.13 V입니다."
+    : spec.model === "diode" && part.type !== "zener"
+      ? "순방향 전류가 흐르기 시작하는 전압입니다. 역방향 정격은 별개의 값입니다." : "";
+  valueHint.textContent = hint;
+  valueHint.hidden = !hint;
+  if (hint) editorInput.setAttribute("aria-describedby", valueHint.id);
+  else editorInput.removeAttribute("aria-describedby");
   byId("editor-frequency").hidden = !spec.shape;
   frequencyInput.disabled = !spec.shape;
   if (spec.shape) {
@@ -655,18 +659,26 @@ function closeEditor(restoreFocus = false) {
   if (restoreFocus && selector) board.querySelector(selector)?.focus({ preventScroll: true });
 }
 
+function reportNumericError(input, spec) {
+  input.setCustomValidity(spec.positive ? "0보다 큰 값을 입력하세요." : "범위 안의 숫자를 입력하세요.");
+  input.reportValidity();
+  input.setCustomValidity("");
+}
+
 editor.addEventListener("submit", (event) => {
   event.preventDefault();
+  if (!editing || editorInput.disabled) return;
+  const spec = components[editing.type];
   const value = editorInput.valueAsNumber;
-  if (!editing || !validPartValue(components[editing.type], value)) return;
+  if (!validPartValue(spec, value)) return reportNumericError(editorInput, spec);
   if (!frequencyInput.disabled) {
     if (!Number.isFinite(frequencyInput.valueAsNumber)) return;
     editing.frequency = frequencyInput.valueAsNumber;
   }
   if (!motorEditor.disabled) {
-    const motor = Object.fromEntries(motorInputs.map((input) => [input.name, input.valueAsNumber]));
-    if (!validMotorSettings(motor)) return;
-    editing.motor = motor;
+    const invalid = motorInputs.find((input) => !validNumericValue(motorSettings[input.name], input.valueAsNumber));
+    if (invalid) return reportNumericError(invalid, motorSettings[invalid.name]);
+    editing.motor = Object.fromEntries(motorInputs.map((input) => [input.name, input.valueAsNumber]));
   }
   editing.value = value;
   recordEdit();
