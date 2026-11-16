@@ -7,7 +7,8 @@ import { pinCount, keyOf, measure, voltageBetween } from "./circuit.js";
 import { chipLibrary } from "./chip-library.js";
 import { validateChip } from "./logic-circuit.js";
 import { createScope, scopeColors } from "./oscilloscope.js";
-import { currentResolution, formatCharge, formatCurrent, formatVoltage } from "./measurement-format.js";
+import { currentResolution, formatCharge, formatCurrent, formatPower, formatVoltage } from "./measurement-format.js";
+import { semiconductorReading, thermalModels } from "./semiconductor.js";
 import { createSimulation, isTimeDependent } from "./simulation.js";
 
 const byId = (id) => document.getElementById(id);
@@ -230,7 +231,7 @@ function measurementText({ part, wire, pin = null }) {
   const reading = !running && simulationError.hidden ? readDC() : boardReading();
   const volts = (end) => reading?.volts.get(keyOf(end));
   const basis = (end) => reading?.references.get(keyOf(end)) > 0 ? "임시 기준" : "접지 기준";
-  let label, voltage, amps, direction, motor;
+  let label, voltage, amps, direction, extra;
   if (wire) {
     label = `배선 ${wire.id}`;
     voltage = basis(wire.a) + " 전압 " + formatVoltage(volts(wire.a));
@@ -263,11 +264,16 @@ function measurementText({ part, wire, pin = null }) {
         `${terminalName(index)} ${formatVoltage(volts([part.id, index]))}`).join("\n");
     }
     if (Math.abs(amps) >= currentResolution) direction = terminalName(0) + " → " + terminalName(1) + " 기준";
-    if (part.type === "motor") motor = motorReadout(part, reading);
+    if (part.type === "motor") extra = motorReadout(part, reading);
+    if (Object.hasOwn(thermalModels, part.type)) {
+      const state = semiconductorReading(part, reading, simulation.temperatureOf(part.id));
+      extra = `소모 전력 ${formatPower(state.power)} · 접합 ${temperatureText(state)}`;
+      if (state.overheated) extra += ` (과열 · 기준 ${thermalModels[part.type].limit} °C)`;
+    }
   }
   const mode = running ? "실시간" : "DC";
   const current = formatCurrent(amps);
-  return [label + " · " + mode, voltage, "전류 " + current, direction, motor].filter(Boolean).join("\n");
+  return [label + " · " + mode, voltage, "전류 " + current, direction, extra].filter(Boolean).join("\n");
 }
 
 function refreshMeasurements() {
@@ -310,9 +316,19 @@ board.addEventListener("pointerdown", hideReadingTip);
 boardScroll.addEventListener("scroll", hideReadingTip);
 
 function lightOn(part, reading) {
-  if (!components[part.type].light) return false;
+  if (part.type !== "lamp") return false;
   const current = reading?.currents.get(part.id) ?? 0;
-  return part.type === "led" ? current > 0.0001 : current ** 2 * part.value > 1e-6;
+  return current ** 2 * part.value > 1e-6;
+}
+
+function temperatureText({ temperature }) {
+  return temperature >= 200 ? "200 °C 이상" : temperature.toFixed(1) + " °C";
+}
+
+function semiconductorText(part, state) {
+  const temperature = temperatureText(state);
+  const brightness = part.type === "led" ? `밝기 ${Math.round(state.brightness * 100)}% · ` : "";
+  return brightness + temperature + (state.overheated ? " · 과열" : "");
 }
 
 function terminalVoltage(reading, id, pin) {
@@ -370,6 +386,13 @@ function refreshBoardReadings(reading) {
     if (!item) continue;
     const spec = components[part.type];
     if (spec.light) item.classList.toggle("lit", lightOn(part, reading));
+    if (Object.hasOwn(thermalModels, part.type)) {
+      const state = semiconductorReading(part, reading, simulation.temperatureOf(part.id));
+      item.style.setProperty("--led-light", Math.sqrt(state.brightness).toFixed(3));
+      item.style.setProperty("--part-heat", state.heat.toFixed(3));
+      item.classList.toggle("overheated", state.overheated);
+      setReadingText(item.querySelector("[data-semiconductor-reading]"), semiconductorText(part, state));
+    }
     if (spec.model === "capacitor") setReadingText(item.querySelector("[data-charge]"), capacitorCharge(part));
     if (spec.model === "motor") setReadingText(item.querySelector("[data-motor-reading]"), motorReadout(part, reading));
     if (part.type === "logicChip") setReadingText(item.querySelector("[data-chip-reading]"), chipReadout(part, reading));
@@ -393,6 +416,8 @@ function partMarkup(part) {
   const selected = isSelected(selection, "part", part.id);
   const reading = boardReading();
   const isLit = lightOn(part, reading);
+  const semiconductor = Object.hasOwn(thermalModels, part.type)
+    ? semiconductorReading(part, reading, simulation.temperatureOf(part.id)) : null;
   let caption = chip ? partName(part) : spec.unit ? spec.name + " · " + part.value + " " + spec.unit : spec.name;
   if (part.type === "ground") caption = "GND";
   const channel = part.type === "scope" ? parts.filter(({ type }) => type === "scope").indexOf(part) : -1;
@@ -435,13 +460,16 @@ function partMarkup(part) {
       <rect x="-39" y="${captionY - 15}" width="78" height="22" rx="6"/>
       <text y="${captionY}">${toggleLabel}</text>
     </g>` : "";
-  return `<g class="part${selected ? " selected" : ""}${isLit ? " lit" : ""}" data-part="${part.id}" transform="translate(${part.x} ${part.y})">
+  const effects = semiconductor ? ` style="--led-light:${Math.sqrt(semiconductor.brightness).toFixed(3)};--part-heat:${semiconductor.heat.toFixed(3)}"` : "";
+  return `<g class="part${selected ? " selected" : ""}${isLit ? " lit" : ""}${part.type === "led" ? " led" : ""}${semiconductor?.overheated ? " overheated" : ""}"${effects} data-part="${part.id}" transform="translate(${part.x} ${part.y})">
     <g data-body="${part.id}" role="button" tabindex="0" aria-label="${isMeter ? spec.name : caption} 선택">
+      ${semiconductor ? `<rect class="semiconductor-heat" x="-45" y="-32" width="90" height="64" rx="12" aria-hidden="true"/>` : ""}
       <rect class="part-box" x="-42" y="-29" width="84" height="58" rx="10"/>
       <path class="part-symbol" transform="rotate(${part.angle})" d="${spec.toggle && part.value ? spec.closed : spec.symbol}"/>
       ${switchControl ? "" : `<text class="part-caption" y="${captionY}"${channel >= 0 ? ` style="fill:${scopeColors[channel]}"` : ""}>${caption}</text>`}
       ${spec.model === "capacitor" ? `<text class="part-caption capacitor-charge" data-charge="${part.id}" y="${captionY + 16}">${capacitorCharge(part)}</text>` : ""}
       ${spec.model === "motor" ? `<text class="part-caption capacitor-charge" data-motor-reading y="${captionY + 16}">${motorReadout(part, reading)}</text>` : ""}
+      ${semiconductor ? `<text class="part-caption semiconductor-reading" data-semiconductor-reading y="${captionY + 16}">${semiconductorText(part, semiconductor)}</text>` : ""}
     </g>${terminals}${switchControl}</g>`;
 }
 

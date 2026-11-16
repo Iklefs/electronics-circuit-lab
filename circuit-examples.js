@@ -116,9 +116,9 @@ export const analogExamples = {
     ...waveComparison("square", "inductor", 10, 10, 20, 2, "capacitor"),
   },
   led: {
-    name: "저항 · LED 전류 제한",
-    role: "LED와 직렬로 연결한 저항은 LED에 흐르는 전류를 제한합니다.",
-    try: "저항을 220 Ω에서 1 kΩ으로 높이고 전류계의 mA 값이 줄어드는지 보세요.",
+    name: "LED · 밝기와 과열",
+    role: "직렬 저항이 순방향 전류를 줄여 LED의 밝기와 발열을 낮춥니다.",
+    try: "시뮬레이션에서 220 Ω을 1 kΩ으로 높여 LED를 어둡게 해 보세요. 15 Ω으로 낮추면 몇 초 후 과열이 표시됩니다.",
     parts: [
       ["source", "source", 120, 260, { angle: 90 }],
       ["resistor", "resistor", 320, 130, { value: 220 }],

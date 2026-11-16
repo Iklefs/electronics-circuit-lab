@@ -117,6 +117,12 @@ button:disabled{cursor:default;opacity:.48}
 .part-symbol{fill:none;stroke:#dbeaff;stroke-width:2.7;stroke-linecap:round;stroke-linejoin:round}
 .part.lit .part-box{fill:#684e20;stroke:#f9d478}
 .part.lit .part-symbol{stroke:#fff0ac}
+.part.led .part-box{fill:color-mix(in srgb,#785222 calc(var(--led-light,0)*100%),#1c314e)}
+.part.led .part-symbol{stroke:color-mix(in srgb,#ffe394 calc(var(--led-light,0)*100%),#dbeaff);filter:drop-shadow(0 0 calc(var(--led-light,0)*5px) #ffce53)}
+.semiconductor-heat{fill:none;stroke:#ff985f;stroke-width:3;opacity:var(--part-heat,0);pointer-events:none;filter:drop-shadow(0 0 5px #ff7c47)}
+.part.overheated .semiconductor-heat{stroke:#ff535f;stroke-width:4;filter:drop-shadow(0 0 7px #ff535f)}
+.part .semiconductor-reading{fill:#ffc7a2;font-size:12px;paint-order:stroke;stroke:#14243b;stroke-width:3;font-variant-numeric:tabular-nums}
+.part.overheated .semiconductor-reading{fill:#ff9ca3}
 .part-caption{fill:#d5e5ff;font-size:13px;font-weight:700;text-anchor:middle;pointer-events:none}
 .part-caption.capacitor-charge{fill:#93e6d5;font-size:12px;font-variant-numeric:tabular-nums}
 .analog-chip-pin{fill:#d5e5ff;font-size:11px;pointer-events:none}
