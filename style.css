@@ -165,6 +165,7 @@ button:disabled{cursor:default;opacity:.48}
 #editor-motor label{display:block;margin-bottom:.3rem}
 #editor-motor p{margin:0;font-size:.72rem}
 #editor-label{display:block;margin-bottom:.2rem}
+#editor-voltage-hint{margin:.3rem 0 0;color:#4b607d;font-size:.72rem}
 
 .ribbon-examples select,.scope-actions select{font-family:inherit;border:1px solid var(--line);border-radius:7px;color:inherit;background:white}
 .scope-actions select{font:inherit;padding:.38rem}

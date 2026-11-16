@@ -21,6 +21,7 @@ const rotationGuide = byId("rotation-guide");
 const draftPoints = byId("draft-points");
 const editor = byId("part-editor");
 const editorInput = byId("part-value");
+const voltageHint = byId("editor-voltage-hint");
 const readingTip = byId("board-reading");
 const editorReading = byId("editor-reading");
 const touchInput = matchMedia("(pointer: coarse)");
@@ -592,6 +593,12 @@ function showEditor() {
   else positionEditor();
 }
 
+function validPartValue(spec, value) {
+  if (spec.toggle) return value === 0 || value === 1;
+  const max = spec.max ?? (spec.unit ? Infinity : 0);
+  return Number.isFinite(value) && value >= (spec.min ?? 0) && value <= max;
+}
+
 function openEditor(part) {
   const spec = components[part.type];
   editing = part;
@@ -601,9 +608,13 @@ function openEditor(part) {
   if (spec.unit) {
     byId("editor-label").textContent = `${spec.label} (${spec.unit})`;
     editorInput.min = spec.min;
-    editorInput.max = spec.max;
+    if (spec.max === undefined) editorInput.removeAttribute("max");
+    else editorInput.max = spec.max;
     editorInput.value = part.value;
   }
+  voltageHint.hidden = spec.shape !== "sine";
+  if (voltageHint.hidden) editorInput.removeAttribute("aria-describedby");
+  else editorInput.setAttribute("aria-describedby", voltageHint.id);
   byId("editor-frequency").hidden = !spec.shape;
   frequencyInput.disabled = !spec.shape;
   if (spec.shape) {
@@ -646,7 +657,8 @@ function closeEditor(restoreFocus = false) {
 
 editor.addEventListener("submit", (event) => {
   event.preventDefault();
-  if (!editing || !Number.isFinite(editorInput.valueAsNumber)) return;
+  const value = editorInput.valueAsNumber;
+  if (!editing || !validPartValue(components[editing.type], value)) return;
   if (!frequencyInput.disabled) {
     if (!Number.isFinite(frequencyInput.valueAsNumber)) return;
     editing.frequency = frequencyInput.valueAsNumber;
@@ -656,7 +668,7 @@ editor.addEventListener("submit", (event) => {
     if (!validMotorSettings(motor)) return;
     editing.motor = motor;
   }
-  editing.value = editorInput.valueAsNumber;
+  editing.value = value;
   recordEdit();
   const id = editing.id;
   closeEditor();
@@ -1309,9 +1321,8 @@ document.addEventListener("paste", (event) => {
     try { chip = validateChip(saved.chip); } catch { return; }
   }
   const spec = components[type];
-  if (![x, y, value].every(Number.isFinite) || !Number.isInteger(angle) || angle < 0 || angle >= 360 ||
-      value < (spec.min ?? 0) || value > (spec.max ?? (spec.toggle ? 1 : 0)) ||
-      (spec.toggle && ![0, 1].includes(value)) ||
+  if (![x, y].every(Number.isFinite) || !Number.isInteger(angle) || angle < 0 || angle >= 360 ||
+      !validPartValue(spec, value) ||
       (spec.shape && (!Number.isFinite(frequency) || frequency < frequencyRange.min || frequency > frequencyRange.max)) ||
       (type === "motor" && !validMotorSettings(motor))) return;
   event.preventDefault();
@@ -1532,9 +1543,7 @@ function route() {
     for (const part of saved.parts) {
       if (!part || !Object.hasOwn(components, part.type) || !validId(part.id)) throw new Error();
       const spec = components[part.type];
-      if (!Number.isFinite(part.value) || part.value < (spec.min ?? 0) ||
-          part.value > (spec.max ?? (spec.toggle ? 1 : 0)) ||
-          (spec.toggle && ![0, 1].includes(part.value)) ||
+      if (!validPartValue(spec, part.value) ||
           (!Number.isInteger(part.angle) || part.angle < 0 || part.angle >= 360) ||
           !Number.isFinite(part.x) || !Number.isFinite(part.y)) throw new Error();
       const clean = { id: part.id, type: part.type, value: part.value, angle: part.angle };

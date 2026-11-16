@@ -21,8 +21,8 @@ export function validMotorSettings(settings) {
 
 function generator(name, icon, shape, path) {
   return {
-    name, icon, shape, group: 0, model: "voltage", value: 5, unit: "V", label: "최대 진폭",
-    min: 0, max: 24, labels: ["출력 (+)", "기준 (−)"], symbol: leads + path + circle,
+    name, icon, shape, group: 0, model: "voltage", value: 5, unit: "V", label: "피크 전압",
+    min: 0, labels: ["출력 (+)", "기준 (−)"], symbol: leads + path + circle,
     note: "0 V를 중심으로 ±진폭을 출력합니다. 주파수와 파형은 오실로스코프에서 확인하세요.",
   };
 }
