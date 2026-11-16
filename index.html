@@ -54,11 +54,13 @@
       <button type="button" data-flow="electrons" aria-pressed="false">전자 이동</button>
     </div>
     <button id="bench-cancel" type="button" hidden>취소</button>
+    <button id="bench-delete-group" type="button" hidden>선택 삭제</button>
     <button id="clear-board" type="button" disabled>모두 지우기</button>
     <div class="board-zoom" role="group" aria-label="회로도 확대 및 축소">
       <button id="zoom-out" data-zoom="out" type="button" aria-label="축소">−</button>
       <button id="zoom-reset" data-zoom="reset" type="button" aria-label="화면 초기화 (100%, 기본 위치)" title="배율과 위치 초기화">초기화 · 100%</button>
       <button id="zoom-in" data-zoom="in" type="button" aria-label="확대">+</button>
+      <button id="bench-pan" type="button" aria-pressed="false" title="확대한 화면을 드래그해 이동">화면 이동</button>
     </div>
     <button id="fullscreen" type="button" aria-pressed="false"><span aria-hidden="true">⛶</span> <span id="fullscreen-label">전체화면</span></button>
   </div></header>
@@ -67,6 +69,7 @@
       <defs><pattern id="board-grid" width="20" height="20" patternUnits="userSpaceOnUse"><circle cx="0" cy="0" r="1.3" fill="#506681"/></pattern></defs>
       <rect id="board-surface" width="960" height="520" fill="url(#board-grid)"/>
       <g id="wire-layer"></g><circle id="rotation-guide" aria-hidden="true" hidden/><path id="wire-preview" hidden/><g id="draft-points"></g><g id="part-layer"></g><g id="placement-preview" aria-hidden="true" hidden></g>
+      <rect id="bench-selection-box" class="selection-box" aria-hidden="true" hidden/>
     </svg>
     <form id="part-editor" class="part-editor" aria-labelledby="editor-title" hidden>
       <div class="editor-heading"><strong id="editor-title"></strong><button id="editor-close" type="button" aria-label="편집 닫기">×</button></div>
@@ -87,8 +90,8 @@
   </div>
   <div class="board-feedback">
     <p id="bench-status" class="board-status" role="status">단자에서 시작해 빈 곳을 클릭하면 배선 경유점을 추가할 수 있습니다.</p>
-    <p class="board-view-hint desktop-hint">휠로 확대·축소 · 확대 후 빈 곳을 끌어 화면 이동 · 복사/잘라내기/붙여넣기 Ctrl(⌘)+C/X/V · 삭제 Delete · 되돌리기 Ctrl(⌘)+Z · 다시 실행 Ctrl(⌘)+Shift+Z</p>
-    <p class="board-view-hint touch-hint">부품을 고른 뒤 작업대를 누르세요. +로 확대하면 빈 곳을 끌어 이동할 수 있습니다.</p>
+    <p class="board-view-hint desktop-hint">빈 곳 드래그로 범위 선택 · Shift+클릭으로 추가·해제 · 휠로 확대·축소 · 화면 이동 버튼 또는 휠 버튼으로 이동 · 복사/잘라내기/붙여넣기 Ctrl(⌘)+C/X/V · 삭제 Delete · 되돌리기 Ctrl(⌘)+Z · 다시 실행 Ctrl(⌘)+Shift+Z</p>
+    <p class="board-view-hint touch-hint">빈 곳을 끌어 여러 부품을 선택하세요. 확대 후 ‘화면 이동’을 켜면 작업대를 끌어 이동할 수 있습니다.</p>
     <p id="simulation-error" class="board-measurement" role="status" hidden></p>
     <p id="flow-status" class="board-measurement" hidden></p>
     <p id="solve-status" class="board-measurement" role="status" hidden></p>
@@ -181,14 +184,16 @@
           <button data-zoom="out" type="button" aria-label="축소">−</button>
           <button data-zoom="reset" type="button" aria-label="화면 초기화 (100%, 기본 위치)">초기화 · 100%</button>
           <button data-zoom="in" type="button" aria-label="확대">+</button>
+          <button id="logic-pan" type="button" aria-pressed="false" title="확대한 화면을 드래그해 이동">화면 이동</button>
         </div>
       </div>
     </header>
     <div class="board-scroll">
-      <svg id="logic-board" viewBox="0 0 960 480" aria-label="논리회로 조립 영역">
+      <svg id="logic-board" tabindex="-1" viewBox="0 0 960 480" aria-label="논리회로 조립 영역">
         <defs><pattern id="logic-grid" width="20" height="20" patternUnits="userSpaceOnUse"><circle r="1.3" fill="#506681"/></pattern></defs>
         <rect id="logic-surface" width="960" height="480" fill="url(#logic-grid)"/>
         <g id="logic-wires"></g><path id="logic-draft" hidden/><g id="logic-parts"></g>
+        <rect id="logic-selection-box" class="selection-box" aria-hidden="true" hidden/>
       </svg>
       <div id="logic-empty" class="logic-empty"><strong>빈 논리회로</strong><p>위에서 부품을 끌어 놓거나 반가산기 예제를 여세요.</p></div>
     </div>
@@ -201,7 +206,8 @@
         <input id="logic-pulse-duty" type="number" min="10" max="90" step="any" required>
         <button type="submit">적용</button>
       </form>
-      <p class="board-view-hint touch-hint">부품을 고른 뒤 작업대를 누르세요. +로 확대하면 빈 곳을 끌어 이동할 수 있습니다.</p>
+      <p class="board-view-hint desktop-hint">빈 곳 드래그로 범위 선택 · Shift+클릭으로 추가·해제 · 화면 이동 버튼 또는 휠 버튼으로 이동</p>
+      <p class="board-view-hint touch-hint">빈 곳을 끌어 여러 부품을 선택하세요. 확대 후 ‘화면 이동’을 켜면 작업대를 끌어 이동할 수 있습니다.</p>
       <div class="logic-legend" aria-label="신호 색상">
         <span><i data-signal="1"></i>1 HIGH</span><span><i data-signal="0"></i>0 LOW</span><span><i data-signal="-1"></i>X 미정</span>
       </div>

@@ -220,7 +220,8 @@ body.workbench-expanded{overflow:hidden}
 .board-zoom button{font-variant-numeric:tabular-nums}
 .board-zoom #zoom-reset{min-width:3.4rem}
 .board-view-hint{margin:.15rem 0 0;font-size:.72rem;color:#9eb3d0}
-#board.is-zoomed #board-surface{cursor:grab;touch-action:none}
+#board.is-zoomed.pan-mode #board-surface{cursor:grab}
+.selection-box{pointer-events:none;fill:#67a8ff24;stroke:#98c5ff;stroke-width:1.5;stroke-dasharray:5 3;vector-effect:non-scaling-stroke}
 #board.placing #board-surface,.placing-by-drag #board #board-surface{cursor:crosshair}
 #board.panning,#board.panning #board-surface{cursor:grabbing}
 .flow-stream{animation-duration:var(--flow-period,.7s)}
@@ -294,7 +295,7 @@ body.workbench-expanded{overflow:hidden}
 .logic-wire.selected .logic-signal,.logic-wire:focus-visible .logic-signal{stroke:#ffe298;stroke-width:4}
 .logic-signal[data-signal="-1"],#logic-draft{stroke-dasharray:5 4}
 
-#logic-board.is-zoomed:not(.placing) #logic-surface{cursor:grab}
+#logic-board.is-zoomed.pan-mode:not(.placing) #logic-surface{cursor:grab}
 #logic-board.panning #logic-surface{cursor:grabbing}
 #board.is-zoomed,#logic-board.is-zoomed{touch-action:none}
 #board,#logic-board,.palette,#scope-plot{-webkit-touch-callout:none}

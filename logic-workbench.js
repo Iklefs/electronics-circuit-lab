@@ -1,6 +1,8 @@
 import { solveLogic } from "./wasm-engine.js";
 import { chipId, chipLibrary as chips, saveChipLibrary } from "./chip-library.js";
 import { createBoardCamera } from "./board-camera.js";
+import { bindPanMode, createBoxSelection, isSelected, moveTogether, selectedIds,
+  selectionMessage, toggleSelection } from "./board-selection.js";
 import { chipPinY, chipPreview } from "./logic-chip-preview.js";
 import { fullChipDiagram } from "./logic-chip-diagram.js";
 import { createLogicScope } from "./logic-scope.js";
@@ -59,6 +61,8 @@ let editedPulseId = null;
 const { view: camera, set: setCamera, point } = createBoardCamera(board, {
   width, height, controls: byId("logic-zoom"), busy: () => Boolean(gesture),
 });
+const boxSelection = createBoxSelection(byId("logic-selection-box"), point, partLayer, wireLayer);
+const panRequested = bindPanMode(board, byId("logic-pan"));
 
 const textValue = (value) => value === 0 || value === 1 ? String(value) : "X";
 const signal = (value) => value === 0 || value === 1 ? value : -1;
@@ -111,7 +115,7 @@ function path(a, b, shift = 0) {
 function partMarkup(part, values) {
   const chip = chips.get(part.type);
   const current = values?.get(part.id);
-  const selected = selection?.kind === "part" && selection.id === part.id;
+  const selected = isSelected(selection, "part", part.id);
   const input = part.type === "input";
   const pulse = part.type === "pulse";
   const output = part.type === "output";
@@ -153,7 +157,7 @@ function draw(values) {
   partLayer.innerHTML = parts.map((part) => partMarkup(part, values)).join("");
   wireLayer.innerHTML = wires.map(({ id, a, b, shift }) => {
     const d = path(pinPosition(a), pinPosition(b), shift);
-    const selected = selection?.kind === "wire" && selection.id === id;
+    const selected = isSelected(selection, "wire", id);
     return `<g class="wire logic-wire${selected ? " selected" : ""}" data-logic-wire="${id}" role="button" tabindex="0" aria-label="배선 ${id} 선택">
       <path class="logic-signal" data-signal="${signal(values?.get(a[0])?.[a[1]])}" d="${d}"/><path class="wire-hit" d="${d}"/></g>`;
   }).join("");
@@ -297,12 +301,17 @@ pulseSettings.addEventListener("submit", (event) => {
   update(`펄스를 ${frequency} Hz, HIGH ${duty}%로 설정했습니다.`);
 });
 
-function move(part, x, y) {
+function partBounds(part) {
   const chip = chips.get(part.type);
   const horizontal = chip ? 110 : 65;
   const vertical = chip ? chipHeight(chip) / 2 + 10 : 42;
-  part.x = Math.max(horizontal, Math.min(width - horizontal, Math.round(x / 10) * 10));
-  part.y = Math.max(vertical, Math.min(height - vertical, Math.round(y / 10) * 10));
+  return { left: horizontal, right: width - horizontal, top: vertical, bottom: height - vertical };
+}
+
+function move(part, x, y) {
+  const { left, right, top, bottom } = partBounds(part);
+  part.x = Math.max(left, Math.min(right, Math.round(x / 10) * 10));
+  part.y = Math.max(top, Math.min(bottom, Math.round(y / 10) * 10));
 }
 
 function add(type, x, y, label) {
@@ -356,7 +365,7 @@ function connect(end) {
   update("배선을 연결했습니다.");
 }
 
-function activate(target) {
+function activate(target, additive = false) {
   const pin = target.closest("[data-logic-pin]");
   if (pin) return connect([Number(pin.dataset.node), Number(pin.dataset.logicPin)]);
   pending = null;
@@ -375,6 +384,13 @@ function activate(target) {
     }
     input.value = 1 - input.value;
     update(`${input.label ?? "입력 스위치"}를 ${input.value}로 바꿨습니다.`);
+    return;
+  }
+  if (additive) {
+    if (part) selection = toggleSelection(selection, "part", Number(part.dataset.logicBody));
+    else if (wire) selection = toggleSelection(selection, "wire", Number(wire.dataset.logicWire));
+    update(selectionMessage(selection, instructions), false);
+    board.focus({ preventScroll: true });
     return;
   }
   selection = part ? { kind: "part", id: Number(part.dataset.logicBody) } :
@@ -396,17 +412,30 @@ palette.addEventListener("pointerdown", (event) => {
   button.setPointerCapture(event.pointerId);
 });
 board.addEventListener("pointerdown", (event) => {
-  if (!event.isPrimary || placing || event.button !== 0 || gesture) return;
+  if (!event.isPrimary || placing || gesture) return;
   const start = { pointer: event.pointerId, x: event.clientX, y: event.clientY };
-  if (camera.zoom > 1 && event.target === surface) {
-    gesture = { ...start, camera: { ...camera }, scale: board.getScreenCTM().a };
+  const empty = event.target === surface && event.button === 0 && !pending;
+  if (camera.zoom > 1 && panRequested(event) && (empty || event.button === 1)) {
+    gesture = { ...start, camera: { ...camera }, scale: board.getScreenCTM().a, empty };
+    if (event.button === 1) event.preventDefault();
+    board.setPointerCapture(event.pointerId);
+    return;
+  }
+  if (event.button !== 0) return;
+  if (empty) {
+    const { x, y } = point(event);
+    gesture = { ...start, box: { x, y, clientX: start.x, clientY: start.y }, additive: event.shiftKey };
     board.setPointerCapture(event.pointerId);
     return;
   }
   const body = event.target.closest("[data-logic-body]");
-  if (!body) return;
+  if (!body || event.shiftKey) return;
   const part = parts.find(({ id }) => id === Number(body.dataset.logicBody));
   gesture = { ...start, part, anchor: point(event), original: [part.x, part.y] };
+  if (selection?.kind === "group" && isSelected(selection, "part", part.id)) {
+    const items = new Set(parts.filter(({ id }) => selection.parts.includes(id)));
+    gesture.group = { items, move: moveTogether([...items], partBounds) };
+  }
   body.setPointerCapture(event.pointerId);
 });
 
@@ -416,6 +445,10 @@ function moveGesture(event) {
   const dy = event.clientY - gesture.y;
   if (!gesture.moved && Math.hypot(dx, dy) < 6) return;
   gesture.moved = true;
+  if (gesture.box) {
+    boxSelection.draw(gesture.box, event);
+    return;
+  }
   if (gesture.camera) {
     const { camera: start, scale } = gesture;
     board.classList.add("panning");
@@ -427,12 +460,19 @@ function moveGesture(event) {
     board.classList.add("placing");
     return;
   }
-  const { part, anchor, original } = gesture;
+  const { part, anchor, original, group } = gesture;
   const position = point(event);
-  move(part, original[0] + position.x - anchor.x, original[1] + position.y - anchor.y);
-  const item = partLayer.querySelector(`[data-logic-part="${part.id}"]`);
-  item.setAttribute("transform", `translate(${part.x} ${part.y})`);
-  for (const wire of wires.filter(({ a, b }) => a[0] === part.id || b[0] === part.id)) {
+  const offsetX = position.x - anchor.x;
+  const offsetY = position.y - anchor.y;
+  if (group) group.move(offsetX, offsetY);
+  else move(part, original[0] + offsetX, original[1] + offsetY);
+  const movedParts = group ? [...group.items] : [part];
+  const movedIds = new Set(movedParts.map(({ id }) => id));
+  for (const item of movedParts) {
+    partLayer.querySelector(`[data-logic-part="${item.id}"]`)
+      .setAttribute("transform", `translate(${item.x} ${item.y})`);
+  }
+  for (const wire of wires.filter(({ a, b }) => movedIds.has(a[0]) || movedIds.has(b[0]))) {
     const group = wireLayer.querySelector(`[data-logic-wire="${wire.id}"]`);
     const d = path(pinPosition(wire.a), pinPosition(wire.b), wire.shift);
     for (const line of group.children) line.setAttribute("d", d);
@@ -442,18 +482,28 @@ function moveGesture(event) {
 let suppressClick = false;
 function finish(event, cancelled = false) {
   if (gesture?.pointer !== event.pointerId) return;
-  const { part, type, moved, original, camera: start } = gesture;
+  const { part, type, moved, original, camera: start, empty, box, additive, group } = gesture;
   gesture = null;
   if (type && !moved) return;
   suppressClick = !cancelled;
+  if (box) {
+    boxSelection.hide();
+    if (cancelled) return;
+    if (moved) selection = boxSelection.finish(box, event, additive ? selection : null);
+    else if (!additive) selection = null;
+    update(selectionMessage(selection, instructions), false);
+    board.focus({ preventScroll: true });
+    return;
+  }
   if (start) {
     board.classList.remove("panning");
     if (cancelled) setCamera(start.zoom, start.x, start.y);
-    else if (!moved) activate(surface);
+    else if (!moved && empty) activate(surface);
     return;
   }
   if (cancelled) {
     if (part) [part.x, part.y] = original;
+    group?.move(0, 0);
     update(instructions, false);
     return;
   }
@@ -465,15 +515,15 @@ function finish(event, cancelled = false) {
     update(instructions, false);
     return;
   }
-  selection = { kind: "part", id: part.id };
+  if (!group || !moved) selection = { kind: "part", id: part.id };
   pending = null;
   if (moved) {
-    update(instructions);
+    update(group ? "선택한 부품을 함께 옮겼습니다." : instructions);
     return;
   }
   // Keep the clicked SVG element in place so the browser can target a double click.
   for (const node of partLayer.children) node.classList.toggle("selected", Number(node.dataset.logicPart) === part.id);
-  wireLayer.querySelector(".selected")?.classList.remove("selected");
+  for (const wire of wireLayer.querySelectorAll(".selected")) wire.classList.remove("selected");
   partLayer.querySelector(".logic-pin.pending")?.classList.remove("pending");
   draft.setAttribute("hidden", "");
   byId("logic-cancel").hidden = true;
@@ -506,12 +556,12 @@ board.addEventListener("click", (event) => {
     const { x, y } = point(event);
     if (x >= 0 && x <= width && y >= 0 && y <= height) place(placing, x, y);
   } else if (event.target !== board) {
-    activate(event.target);
+    activate(event.target, event.shiftKey);
   }
 });
 
 board.addEventListener("dblclick", (event) => {
-  if (placing || gesture) return;
+  if (placing || gesture || event.shiftKey) return;
   const body = event.target.closest("[data-logic-body]");
   const part = body && parts.find(({ id }) => id === Number(body.dataset.logicBody));
   const chip = part && chips.get(part.type);
@@ -578,12 +628,12 @@ byId("logic-cancel").addEventListener("click", () => {
 });
 
 byId("logic-delete").addEventListener("click", () => {
-  if (!selection) return;
-  if (selection.kind === "part") {
-    pulseStarts.delete(selection.id);
-    parts = parts.filter(({ id }) => id !== selection.id);
-    wires = wires.filter(({ a, b }) => a[0] !== selection.id && b[0] !== selection.id);
-  } else wires = wires.filter(({ id }) => id !== selection.id);
+  if (!selection || gesture) return;
+  const selectedParts = new Set(selectedIds(selection, "part"));
+  const selectedWires = new Set(selectedIds(selection, "wire"));
+  for (const id of selectedParts) pulseStarts.delete(id);
+  parts = parts.filter(({ id }) => !selectedParts.has(id));
+  wires = wires.filter(({ id, a, b }) => !selectedWires.has(id) && !selectedParts.has(a[0]) && !selectedParts.has(b[0]));
   selection = pending = null;
   update("선택한 항목을 삭제했습니다.");
 });
@@ -599,9 +649,11 @@ document.addEventListener("keydown", (event) => {
   if (workspace.hidden || chipDialog.open || event.target.matches("input, textarea, select")) return;
   if (event.key === "Escape") {
     if (gesture) finish({ pointerId: gesture.pointer }, true);
+    else selection = null;
     pending = placing = null;
     update(instructions, false);
   } else if (event.key === "Delete") {
+    event.preventDefault();
     byId("logic-delete").click();
   } else if (event.key === "Enter" && placing && palette.contains(event.target)) {
     event.preventDefault();
@@ -611,7 +663,7 @@ document.addEventListener("keydown", (event) => {
     const { logicPin, node, logicToggle, logicBody, logicWire } = event.target.dataset;
     const selector = logicPin !== undefined ? `[data-logic-pin="${logicPin}"][data-node="${node}"]` :
       logicToggle ? `[data-logic-toggle="${logicToggle}"]` : logicBody ? `[data-logic-body="${logicBody}"]` : `[data-logic-wire="${logicWire}"]`;
-    activate(event.target);
+    activate(event.target, event.shiftKey);
     board.querySelector(selector)?.focus({ preventScroll: true });
   }
 });

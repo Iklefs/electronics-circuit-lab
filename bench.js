@@ -1,4 +1,6 @@
 import { createBoardCamera } from "./board-camera.js";
+import { bindPanMode, createBoxSelection, isSelected, moveTogether, selectedIds,
+  selectionMessage, toggleSelection } from "./board-selection.js";
 import { analogExamples, bindExamplePicker, buildExample } from "./circuit-examples.js";
 import { chipPackage, components, frequencyRange, groups, logicChipGroup, motorSettings, pinsFor, validMotorSettings } from "./components.js";
 import { pinCount, keyOf, measure, voltageBetween } from "./circuit.js";
@@ -390,7 +392,7 @@ function refreshBoardReadings(reading) {
 function partMarkup(part) {
   const spec = components[part.type];
   const chip = part.chip && chipPackage(part.chip);
-  const selected = selection?.kind === "part" && selection.id === part.id;
+  const selected = isSelected(selection, "part", part.id);
   const reading = boardReading();
   const isLit = lightOn(part, reading);
   let caption = chip ? partName(part) : spec.unit ? spec.name + " · " + part.value + " " + spec.unit : spec.name;
@@ -459,8 +461,8 @@ function drawWires() {
     const start = pinPosition(a);
     const end = pinPosition(b);
     const path = points ? routedPath(start, points, end) : wirePath(start, end);
-    const selected = selection?.kind === "wire" && selection.id === id;
-    const handles = selected ? (points ?? []).map(([x, y], index) =>
+    const selected = isSelected(selection, "wire", id);
+    const handles = selected && selection.kind === "wire" ? (points ?? []).map(([x, y], index) =>
       `<circle class="waypoint" data-bend="${index}" cx="${x}" cy="${y}" r="6"><title>끌어서 경유점 이동</title></circle>`
     ).join("") : "";
     return `<g class="wire${selected ? " selected" : ""}" data-wire="${id}" role="button" tabindex="0" aria-label="배선 ${id} 선택"><path class="wire-line" d="${path}"/>
@@ -689,6 +691,7 @@ function draw() {
   byId("bench-count").textContent = `부품 ${parts.length}개 · 배선 ${wires.length}개`;
   byId("empty-board").hidden = parts.length > 0 || Boolean(placing) || Boolean(paletteDrag?.moved);
   byId("clear-board").disabled = !parts.length;
+  byId("bench-delete-group").hidden = selection?.kind !== "group";
   byId("example").disabled = parts.length > 0;
   refreshSolveStatus(boardReading());
   drawInspector();
@@ -727,20 +730,27 @@ const { view: camera, set: setCamera, point } = createBoardCamera(board, {
     positionEditor();
   },
 });
+const boxSelection = createBoxSelection(byId("bench-selection-box"), point, partLayer, wireLayer);
+const panRequested = bindPanMode(board, byId("bench-pan"));
 byId("simulation-speed").addEventListener("change", (event) => {
   const speed = Number(event.target.value);
   simulation.setSpeed(speed);
   board.style.setProperty("--flow-period", `${0.7 / speed}s`);
 });
 
-function move(part, x, y) {
+function partBounds(part) {
   const chipPins = part.chip ? pinsFor(part) : [];
   const angle = (part.angle ?? 0) * Math.PI / 180;
   const side = Math.max(60, ...chipPins.map(([x, y]) => Math.abs(x * Math.cos(angle) - y * Math.sin(angle)) + 10));
   const top = Math.max(60, ...chipPins.map(([x, y]) => Math.abs(x * Math.sin(angle) + y * Math.cos(angle)) + 22));
-  part.x = Math.max(side, Math.min(width - side, Math.round(x / 10) * 10));
   const bottom = Math.max(80, part.chip ? top + 28 : 80);
-  part.y = Math.max(top, Math.min(height - bottom, Math.round(y / 10) * 10));
+  return { left: side, right: width - side, top, bottom: height - bottom };
+}
+
+function move(part, x, y) {
+  const { left, right, top, bottom } = partBounds(part);
+  part.x = Math.max(left, Math.min(right, Math.round(x / 10) * 10));
+  part.y = Math.max(top, Math.min(bottom, Math.round(y / 10) * 10));
 }
 
 function addPart(type, x, y, chip = chipLibrary.get(type)) {
@@ -823,7 +833,7 @@ function connect(id, pin) {
   update();
 }
 
-function activate(target, anchor) {
+function activate(target, anchor, additive = false) {
   const terminal = target.closest("[data-terminal]");
   const body = target.closest("[data-body]");
   const wire = target.closest("[data-wire]");
@@ -838,6 +848,14 @@ function activate(target, anchor) {
     return;
   }
   pending = null;
+  if (additive) {
+    if (body) selection = toggleSelection(selection, "part", Number(body.dataset.body));
+    else if (wire) selection = toggleSelection(selection, "wire", Number(wire.dataset.wire));
+    status.textContent = selectionMessage(selection, defaultStatus);
+    draw();
+    board.focus({ preventScroll: true });
+    return;
+  }
   selection = body ? { kind: "part", id: Number(body.dataset.body) } :
     wire ? { kind: "wire", id: Number(wire.dataset.wire) } : null;
   status.textContent = defaultStatus;
@@ -932,12 +950,19 @@ function draftEnd(event, x, y) {
 
 board.addEventListener("pointerdown", (event) => {
   if (!event.isPrimary || drag || placing || paletteDrag) return;
-  const panOnEmpty = event.button === 0 && event.target === boardSurface && !pending;
-  if (camera.zoom > 1 && (event.button === 1 || panOnEmpty)) {
+  const empty = event.button === 0 && event.target === boardSurface && !pending;
+  if (camera.zoom > 1 && panRequested(event) && (empty || event.button === 1)) {
     const matrix = board.getScreenCTM();
     drag = { camera: { ...camera }, clientX: event.clientX, clientY: event.clientY,
-      scale: matrix.a, pointer: event.pointerId, moved: false, panOnEmpty };
+      scale: matrix.a, pointer: event.pointerId, moved: false, panOnEmpty: empty };
     if (event.button === 1) event.preventDefault();
+    board.setPointerCapture(event.pointerId);
+    return;
+  }
+  if (empty) {
+    const { x, y } = point(event);
+    drag = { box: { x, y, clientX: event.clientX, clientY: event.clientY },
+      pointer: event.pointerId, additive: event.shiftKey };
     board.setPointerCapture(event.pointerId);
     return;
   }
@@ -952,6 +977,7 @@ board.addEventListener("pointerdown", (event) => {
   }
   const terminal = event.target.closest("[data-terminal]");
   const body = event.target.closest("[data-body]");
+  if (body && !terminal && event.shiftKey) return;
   if ((!terminal && !body) || (terminal && pending)) return;
   const id = Number(terminal ? terminal.dataset.part : body.dataset.body);
   const part = parts.find((item) => item.id === id);
@@ -961,6 +987,19 @@ board.addEventListener("pointerdown", (event) => {
     bearing: bearing(part, x, y), pin: terminal ? Number(terminal.dataset.terminal) : null,
     pointer: event.pointerId, moved: false,
   };
+  if (!terminal && selection?.kind === "group" && isSelected(selection, "part", id)) {
+    const ids = new Set(selection.parts);
+    const items = parts.filter((part) => ids.has(part.id));
+    const routes = wires.filter(({ a, b, points }) => points && ids.has(a[0]) && ids.has(b[0]))
+      .map((wire) => ({ wire, points: wire.points }));
+    const routePoints = routes.flatMap(({ points }) => points.map(([x, y]) => ({ x, y })));
+    const translate = moveTogether([...items, ...routePoints], (item) =>
+      ids.has(item.id) ? partBounds(item) : { left: 0, top: 0, right: width, bottom: height });
+    drag.group = { items, move(dx, dy) {
+      const [offsetX, offsetY] = translate(dx, dy);
+      for (const { wire, points } of routes) wire.points = points.map(([x, y]) => [x + offsetX, y + offsetY]);
+    } };
+  }
   if (terminal) {
     drag.rotationRadius = Math.max(42, ...pinsFor(part).map(([dx, dy]) => Math.hypot(dx, dy))) + 34;
     rotationGuide.setAttribute("cx", part.x);
@@ -973,6 +1012,14 @@ board.addEventListener("pointerdown", (event) => {
 });
 board.addEventListener("pointermove", (event) => {
   if (!drag && !pending) return;
+  if (drag?.box) {
+    if (drag.pointer !== event.pointerId) return;
+    const { clientX, clientY } = drag.box;
+    if (!drag.moved && Math.hypot(event.clientX - clientX, event.clientY - clientY) < 5) return;
+    drag.moved = true;
+    boxSelection.draw(drag.box, event);
+    return;
+  }
   if (drag?.camera) {
     if (drag.pointer !== event.pointerId) return;
     const dx = event.clientX - drag.clientX;
@@ -1020,13 +1067,19 @@ board.addEventListener("pointermove", (event) => {
     drag.moved = true;
     closeEditor();
     pending = null;
-    selection = { kind: "part", id: part.id };
+    if (!drag.group) selection = { kind: "part", id: part.id };
     board.classList.add(pin === null ? "moving-part" : "rotating-part");
     drawDraft();
     byId("bench-share-box").hidden = true;
   }
   const item = partLayer.querySelector(`.part[data-part="${part.id}"]`);
-  if (pin === null) {
+  if (drag.group) {
+    drag.group.move(x - drag.x, y - drag.y);
+    for (const member of drag.group.items) {
+      partLayer.querySelector(`.part[data-part="${member.id}"]`)
+        .setAttribute("transform", `translate(${member.x} ${member.y})`);
+    }
+  } else if (pin === null) {
     move(part, drag.startX + x - drag.x, drag.startY + y - drag.y);
     item.setAttribute("transform", `translate(${part.x} ${part.y})`);
   } else {
@@ -1046,6 +1099,19 @@ function finishDrag(event, cancelled = false) {
   if (drag?.pointer !== event.pointerId) return;
   // Touch can send a click to the newly drawn surface after pointerup.
   suppressBoardClick = !cancelled;
+  if (drag.box) {
+    const { box, moved, additive } = drag;
+    drag = null;
+    boxSelection.hide();
+    if (cancelled) return;
+    closeEditor();
+    if (moved) selection = boxSelection.finish(box, event, additive ? selection : null);
+    else if (!additive) selection = null;
+    status.textContent = selectionMessage(selection, defaultStatus);
+    draw();
+    board.focus({ preventScroll: true });
+    return;
+  }
   if (drag.camera) {
     const previous = drag;
     drag = null;
@@ -1061,13 +1127,14 @@ function finishDrag(event, cancelled = false) {
     draw();
     return;
   }
-  const { part, pin, moved, wiring, startX, startY, startAngle } = drag;
+  const { part, pin, moved, wiring, startX, startY, startAngle, group } = drag;
   drag = null;
   rotationGuide.setAttribute("hidden", "");
   board.classList.remove("moving-part", "rotating-part");
   if (cancelled) {
     if (wiring) pending = null;
     Object.assign(part, { x: startX, y: startY, angle: startAngle });
+    group?.move(0, 0);
     status.textContent = defaultStatus;
     draw();
     return;
@@ -1086,10 +1153,11 @@ function finishDrag(event, cancelled = false) {
     connect(part.id, pin);
     return;
   }
-  selection = { kind: "part", id: part.id };
+  if (!group || !moved) selection = { kind: "part", id: part.id };
   pending = null;
   if (moved) recordEdit();
-  status.textContent = !moved ? defaultStatus : pin === null ? "부품 위치를 바꿨습니다." :
+  status.textContent = group && moved ? "선택한 부품을 함께 옮겼습니다." :
+    !moved ? defaultStatus : pin === null ? "부품 위치를 바꿨습니다." :
     `부품을 ${part.angle}°로 회전했습니다.`;
   draw();
   if (!moved) openEditor(part);
@@ -1113,7 +1181,7 @@ board.addEventListener("click", (event) => {
     drawDraft();
     status.textContent = `경유점 ${bends.length}개 · 두 번째 단자를 눌러 연결하세요. Backspace로 마지막 점을 지울 수 있습니다.`;
   } else if (event.target !== board) {
-    activate(event.target, point(event));
+    activate(event.target, point(event), event.shiftKey);
   }
 });
 byId("bench-cancel").addEventListener("click", () => {
@@ -1154,6 +1222,7 @@ document.addEventListener("keydown", (event) => {
       return;
     }
     if (drag) finishDrag({ pointerId: drag.pointer }, true);
+    else selection = null;
     pending = null;
     placing = null;
     status.textContent = defaultStatus;
@@ -1172,7 +1241,7 @@ document.addEventListener("keydown", (event) => {
       `[data-part="${target.dataset.part}"][data-terminal="${target.dataset.terminal}"]` :
       target.hasAttribute("data-body") ? `[data-body="${target.dataset.body}"]` :
       `[data-wire="${target.dataset.wire}"]`;
-    activate(target);
+    activate(target, undefined, event.shiftKey);
     if (!editor.hidden) {
       (editorInput.disabled ? byId("editor-delete") : editorInput).focus({ preventScroll: true });
     } else board.querySelector(selector)?.focus();
@@ -1245,21 +1314,21 @@ document.addEventListener("paste", (event) => {
 function deleteSelection() {
   if (!selection || drag || paletteDrag) return;
   closeEditor();
-  const { kind, id } = selection;
-  if (kind === "part") {
-    parts = parts.filter((part) => part.id !== id);
-    wires = wires.filter(({ a, b }) => a[0] !== id && b[0] !== id);
-  } else {
-    wires = wires.filter((wire) => wire.id !== id);
-  }
+  const { kind } = selection;
+  const selectedParts = new Set(selectedIds(selection, "part"));
+  const selectedWires = new Set(selectedIds(selection, "wire"));
+  parts = parts.filter(({ id }) => !selectedParts.has(id));
+  wires = wires.filter(({ id, a, b }) => !selectedWires.has(id) && !selectedParts.has(a[0]) && !selectedParts.has(b[0]));
   recordEdit();
   selection = pending = null;
   bends = [];
   update();
   board.focus({ preventScroll: true });
-  status.textContent = kind === "part" ? "부품과 연결된 배선을 지웠습니다." : "배선을 지웠습니다.";
+  status.textContent = kind === "group" ? "선택한 항목을 삭제했습니다." :
+    kind === "part" ? "부품과 연결된 배선을 지웠습니다." : "배선을 지웠습니다.";
 }
 byId("editor-delete").addEventListener("click", deleteSelection);
+byId("bench-delete-group").addEventListener("click", deleteSelection);
 byId("clear-board").addEventListener("click", () => {
   if (drag || paletteDrag) return;
   closeEditor();
