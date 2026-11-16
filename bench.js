@@ -7,6 +7,7 @@ import { pinCount, keyOf, measure, voltageBetween } from "./circuit.js";
 import { chipLibrary } from "./chip-library.js";
 import { validateChip } from "./logic-circuit.js";
 import { createScope, scopeColors } from "./oscilloscope.js";
+import { currentResolution, formatCharge, formatCurrent, formatVoltage } from "./measurement-format.js";
 import { createSimulation, isTimeDependent } from "./simulation.js";
 
 const byId = (id) => document.getElementById(id);
@@ -50,7 +51,6 @@ const maxWires = 60;
 const maxPoints = 12;
 const rotationStep = 15;
 const historyLimit = 100;
-const minDisplayedChargeMicrocoulombs = 0.001;
 let parts = [];
 let wires = [];
 const undoStack = [];
@@ -222,9 +222,7 @@ function terminalLabel(part, pin) {
 function capacitorCharge(part) {
   const voltage = voltageBetween(transientReading, [part.id, 0], [part.id, 1]);
   if (voltage === undefined) return "";
-  const charge = part.value * voltage;
-  const displayedCharge = Math.abs(charge) < minDisplayedChargeMicrocoulombs ? 0 : charge;
-  return "Q " + number(displayedCharge, "µC");
+  return "Q " + formatCharge(part.value * 1e-6 * voltage);
 }
 
 function measurementText({ part, wire, pin = null }) {
@@ -235,9 +233,9 @@ function measurementText({ part, wire, pin = null }) {
   let label, voltage, amps, direction, motor;
   if (wire) {
     label = `배선 ${wire.id}`;
-    voltage = basis(wire.a) + " 전압 " + number(volts(wire.a), "V");
+    voltage = basis(wire.a) + " 전압 " + formatVoltage(volts(wire.a));
     amps = reading?.wireCurrents.get(wire.id);
-    if (amps) {
+    if (Math.abs(amps) >= currentResolution) {
       const [from, to] = amps > 0 ? [wire.a, wire.b] : [wire.b, wire.a];
       const terminalName = ([id, index]) => {
         const device = parts.find((item) => item.id === id);
@@ -253,22 +251,22 @@ function measurementText({ part, wire, pin = null }) {
     amps = reading?.currents.get(part.id);
     if (pin !== null || pinCount(part) === 1) {
       const end = [part.id, pin ?? 0];
-      voltage = `${terminalName(end[1])} 전압 ${number(volts(end), "V")} · ${basis(end)}`;
+      voltage = `${terminalName(end[1])} 전압 ${formatVoltage(volts(end))} · ${basis(end)}`;
     } else if (part.type === "logicChip") {
       voltage = chipReadout(part, reading);
     } else if (pinCount(part) === 2) {
-      voltage = "양단 전압 " + number(voltageBetween(reading, [part.id, 0], [part.id, 1]), "V");
+      voltage = "양단 전압 " + formatVoltage(voltageBetween(reading, [part.id, 0], [part.id, 1]));
       const charge = spec.model === "capacitor" && capacitorCharge(part);
       if (charge) voltage += "\n" + charge;
     } else {
       voltage = pinsFor(part).map((_, index) =>
-        `${terminalName(index)} ${number(volts([part.id, index]), "V")}`).join("\n");
+        `${terminalName(index)} ${formatVoltage(volts([part.id, index]))}`).join("\n");
     }
-    if (amps) direction = terminalName(0) + " → " + terminalName(1) + " 기준";
+    if (Math.abs(amps) >= currentResolution) direction = terminalName(0) + " → " + terminalName(1) + " 기준";
     if (part.type === "motor") motor = motorReadout(part, reading);
   }
   const mode = running ? "실시간" : "DC";
-  const current = number(amps === undefined ? undefined : amps * 1000, "mA");
+  const current = formatCurrent(amps);
   return [label + " · " + mode, voltage, "전류 " + current, direction, motor].filter(Boolean).join("\n");
 }
 
@@ -319,16 +317,16 @@ function lightOn(part, reading) {
 
 function terminalVoltage(reading, id, pin) {
   const voltage = reading?.volts.get(keyOf([id, pin]));
-  return voltage === undefined ? "—" : number(voltage, "V");
+  return voltage === undefined ? "—" : formatVoltage(voltage);
 }
 
 function meterCaption(part, reading) {
   if (!live) return components[part.type].name;
   if (part.type === "voltmeter") {
-    return "전압계 · " + number(voltageBetween(reading, [part.id, 0], [part.id, 1]), "V");
+    return "전압계 · " + formatVoltage(voltageBetween(reading, [part.id, 0], [part.id, 1]));
   }
   const current = reading?.currents.get(part.id);
-  return "전류계 · " + number(current === undefined ? undefined : current * 1000, "mA");
+  return "전류계 · " + formatCurrent(current);
 }
 
 function motorReadout(part, reading) {
@@ -336,7 +334,7 @@ function motorReadout(part, reading) {
   if (!state) return "";
   const { rpm, backEmf } = state;
   return number(Math.abs(rpm) < 0.01 ? 0 : rpm, "rpm") +
-    " · 역기전력 " + number(Math.abs(backEmf) < 1e-6 ? 0 : backEmf, "V");
+    " · 역기전력 " + formatVoltage(backEmf);
 }
 
 function chipReadout(part, reading) {
@@ -539,7 +537,7 @@ function refreshInspectorCurrent(reading) {
   const current = reading?.currents.get(selection.id);
   label.hidden = current === undefined;
   if (current !== undefined) {
-    setReadingText(label, `전류 ${number(current * 1000, "mA")} · 회전 전 왼쪽 → 오른쪽 기준`);
+    setReadingText(label, `전류 ${formatCurrent(current)} · 회전 전 왼쪽 → 오른쪽 기준`);
   }
 }
 

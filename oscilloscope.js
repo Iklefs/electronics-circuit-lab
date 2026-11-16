@@ -1,12 +1,12 @@
 import { voltageBetween } from "./circuit.js";
+import { formatVoltage, voltageResolution } from "./measurement-format.js";
 
 export const scopeColors = ["#72efd6", "#ffd18c", "#b6baff", "#fc9db6"];
 const byId = (id) => document.getElementById(id);
 const format = (value) => Number(value.toPrecision(4)).toString();
 const cursorTime = new Intl.NumberFormat("ko-KR", { maximumFractionDigits: 7, useGrouping: false });
 const minVoltageRange = 0.01;
-const voltageForDisplay = (voltage) => Math.abs(voltage) < 1e-6 ? 0 : voltage;
-const formatVoltage = (voltage) => Number.isFinite(voltage) ? format(voltageForDisplay(voltage)) + " V" : "미측정";
+const voltageForDisplay = (voltage) => Math.abs(voltage) < voltageResolution ? 0 : voltage;
 const bounds = { left: 66, right: 800, top: 20, bottom: 233 };
 
 function nearestSample(samples, time) {
